@@ -3,7 +3,7 @@ Module      : Language.Rust.Inline.Parser
 Description : Parser for Quasiquotes
 Copyright   : (c) Alec Theriault, 2017
 License     : BSD-style
-Maintainer  : alec.theriault@gmail.com
+Maintainer  : ners <ners@gmx.ch>
 Stability   : experimental
 Portability : GHC
 -}

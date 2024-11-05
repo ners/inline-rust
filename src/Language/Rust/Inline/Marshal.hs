@@ -3,7 +3,7 @@ Module      : Language.Rust.Inline.Marshal
 Description : Utilities for marshalling HAskell values
 Copyright   : (c) Alec Theriault, 2017
 License     : BSD-style
-Maintainer  : alec.theriault@gmail.com
+Maintainer  : ners <ners@gmx.ch>
 Stability   : experimental
 Portability : GHC
 -}
@@ -21,7 +21,7 @@ import Language.Haskell.TH.Syntax  ( addTopDecls )
 import Data.Word
 import Data.Int
 
-import Foreign.Ptr                 ( Ptr, FunPtr, plusPtr )
+import Foreign.Ptr                 ( plusPtr )
 import Foreign.ForeignPtr          ( withForeignPtr )
 import Foreign.StablePtr           ( StablePtr )
 import Foreign.Storable            ( Storable )

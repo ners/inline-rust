@@ -3,7 +3,7 @@ Module      : Language.Rust.Inline.TH.Storable
 Description : Generate Storable instances
 Copyright   : (c) Alec Theriault, 2018
 License     : BSD-style
-Maintainer  : alec.theriault@gmail.com
+Maintainer  : ners <ners@gmx.ch>
 Stability   : experimental
 Portability : GHC
 -}
@@ -82,10 +82,10 @@ data Constructor = Constructor
   }
 
 nameCon :: Name -> Constructor
-nameCon n = Constructor (ConP n) (foldl AppE (ConE n))
+nameCon n = Constructor (ConP n []) (foldl AppE (ConE n))
 
 tupCon :: Constructor
-tupCon = Constructor TupP TupE 
+tupCon = Constructor TupP (TupE . fmap Just)
 
 
 -- * Alignment
@@ -96,31 +96,31 @@ data Alignment = Alignment
   { decs        :: [Dec]
   -- ^ declarations for variables relied on by offset and align
   
-  , offsetSoFar :: TExp Int
+  , offsetSoFar :: Code Q Int
   -- ^ total bytes occupied so far by fields
   
-  , alignSoFar  :: TExp Int
+  , alignSoFar  :: Code Q Int
   -- ^ size (in bytes) of the largest member in the struct
   }
 
 -- | Combining alignment means concatenating the dependent declarations, and
 -- take the maximum for offset and alignment.
-instance Semigroup (Q Alignment) where
-  a1 <> a2 = do
-    newDecs <- (++) <$> fmap decs a1 <*> fmap decs a2
-    newOff  <- [|| $$(offsetSoFar <$> a1) `max` $$(offsetSoFar <$> a2) ||]
-    newAln  <- [|| $$(alignSoFar  <$> a1) `max` $$(alignSoFar  <$> a2) ||]
-    pure $ Alignment newDecs newOff newAln 
+instance Semigroup Alignment where
+  a1 <> a2 = Alignment
+    { decs = decs a1 <> decs a2
+    , offsetSoFar = [|| $$(offsetSoFar a1) `max` $$(offsetSoFar a2) ||]
+    , alignSoFar = [|| $$(alignSoFar a1) `max` $$(alignSoFar a2) ||]
+    }
 
 -- | The 'mconcat' method calls 'maximum'
-instance Monoid (Q Alignment) where
-  mempty = Alignment [] <$> [|| 0 ||] <*> [|| 1 ||]
+instance Monoid Alignment where
+  mempty = Alignment [] [|| 0 ||] [|| 1 ||]
   mappend = (<>)
-  mconcat as = do
-    as' <- sequence as
-    newOff <- [|| maximum $$(pure . listTE . map offsetSoFar $ as') ||]
-    newAln <- [|| maximum $$(pure . listTE . map alignSoFar  $ as') ||]
-    pure $ Alignment (concatMap decs as') newOff newAln
+  mconcat as = Alignment
+    { decs = concatMap decs as
+    , offsetSoFar = [|| maximum $$(liftCode $ listTE <$> mapM (examineCode . offsetSoFar) as) ||]
+    , alignSoFar = [|| maximum $$(liftCode $ listTE <$> mapM (examineCode . alignSoFar) as) ||]
+    }
 
 -- | This is the state we will bundle along while visiting fields.
 type StructState = StateT Alignment Q
@@ -186,33 +186,33 @@ pokeCon con pokeFields ptr = do
 -- | Process a field of a given type.
 processField :: Type -> StructState (Exp -> Q Exp, Exp -> Q Exp)
 processField ty = do
-  let alignTy, sizeTy :: Q (TExp Int)
-      alignTy  = TExp <$> [e| alignment (undefined :: $(pure ty)) |]
-      sizeTy   = TExp <$> [e| sizeOf    (undefined :: $(pure ty)) |]
+  let alignTy, sizeTy :: Code Q Int
+      alignTy  = Code $ TExp <$> [e| alignment (undefined :: $(pure ty)) |]
+      sizeTy   = Code $ TExp <$> [e| sizeOf    (undefined :: $(pure ty)) |]
 
   -- get state at the end of the last field
   Alignment prevDecs prevOff prevAlign <- get
 
   -- beginning offset
   beginOffV <- lift $ newName "beginOff"
-  let beginOffE, beginOff :: Q (TExp Int)
-      beginOffE = [|| $$(pure prevOff) + mod (negate $$(pure prevOff)) $$alignTy ||]
-      beginOff = TExp <$> varE beginOffV
-  assignBeginOff <- lift [d| $(varP beginOffV) = $(unType <$> beginOffE) |]
+  let beginOffE, beginOff :: Code Q Int
+      beginOffE = [|| $$prevOff + mod (negate $$prevOff) $$alignTy ||]
+      beginOff = Code $ TExp <$> varE beginOffV
+  assignBeginOff <- lift [d| $(varP beginOffV) = $(unType <$> examineCode beginOffE) |]
 
   -- offset after this field
   newOffV <- lift $ newName "afterOff"
-  let newOffE :: Q (TExp Int)
+  let newOffE :: Code Q Int
       newOffE = [|| $$beginOff + $$sizeTy ||]
   newOff <- lift (TExp <$> varE newOffV)
-  assignNewOff <- lift [d| $(varP newOffV) = $(unType <$> newOffE) |] 
+  assignNewOff <- lift [d| $(varP newOffV) = $(unType <$> examineCode newOffE) |] 
 
   -- alignment after this field
   newAlignV <- lift $ newName "algn"
-  let newAlignE :: Q (TExp Int)
-      newAlignE = [|| $$alignTy `max` $$(pure prevAlign) ||]
+  let newAlignE :: Code Q Int
+      newAlignE = [|| $$alignTy `max` $$prevAlign ||]
   newAlign <- lift (TExp <$> varE newAlignV)
-  assignNewAlign <- lift [d| $(varP newAlignV) = $(unType <$> newAlignE) |]
+  assignNewAlign <- lift [d| $(varP newAlignV) = $(unType <$> examineCode newAlignE) |]
   
   -- update state
   put (Alignment { decs = concat [ assignBeginOff
@@ -220,13 +220,13 @@ processField ty = do
                                  , assignNewAlign
                                  , prevDecs
                                  ]
-                 , offsetSoFar = newOff
-                 , alignSoFar = newAlign
+                 , offsetSoFar = liftCode (pure newOff)
+                 , alignSoFar = liftCode (pure newAlign)
                  })
 
   -- TODO: consider degenerate sizeof(..) = 0 cases
-  pure ( \addrE -> [e| peek (castPtr $(pure addrE) `plusPtr` $(unType <$> beginOff)) |]
-       , \addrE -> [e| poke (castPtr $(pure addrE) `plusPtr` $(unType <$> beginOff)) |]
+  pure ( \addrE -> [e| peek (castPtr $(pure addrE) `plusPtr` $(unType <$> examineCode beginOff)) |]
+       , \addrE -> [e| poke (castPtr $(pure addrE) `plusPtr` $(unType <$> examineCode beginOff)) |]
        )
 
 
@@ -248,14 +248,14 @@ processADT [(con, fields)] = do
   sizeOf_    <- do
     Just sizeOfN <- lookupValueName "sizeOf"
     funD sizeOfN [clause [wildP]
-                         (normalB [e| let c = $(pure . unType $ off)
-                                      in c + mod (negate c) $(pure . unType $ algn) |])
+                         (normalB [e| let c = $(unType <$> examineCode off)
+                                      in c + mod (negate c) $(unType <$> examineCode algn) |])
                          ds']
 
   -- alignment
   alignment_ <- do
     Just alignmentN <- lookupValueName "alignment"
-    funD alignmentN [clause [wildP] (normalB (pure . unType $ algn)) ds']
+    funD alignmentN [clause [wildP] (normalB (unType <$> examineCode algn)) ds']
 
   let (peekFields, pokeFields) = unzip peekPokes
   
@@ -292,14 +292,14 @@ processADT cons = do
       pure ((con, peekFields, pokeFields), algn)
   Alignment ds off algn <- mconcat (map pure algns)
   let discSizeOf = [e| sizeOf (undefined :: $(pure discTy)) |]
-      algn' = [e| $discSizeOf `max` $(pure . unType $ algn) |]
-  let ds' = map pure $ ds
+      algn' = [e| $discSizeOf `max` $(unType <$> examineCode algn) |]
+  let ds' = map pure ds
 
   -- sizeOf
   sizeOf_ <- do
     Just sizeOfN <- lookupValueName "sizeOf"
     funD sizeOfN [clause [wildP]
-                         (normalB [e| let c = $(pure . unType $ off)
+                         (normalB [e| let c = $(unType <$> examineCode off)
                                       in $algn' + c + mod (negate c) $algn' |])
                          ds']
 

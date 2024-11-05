@@ -3,11 +3,13 @@ Module      : Language.Rust.Inline.Internal
 Description : Manages the module-level state
 Copyright   : (c) Alec Theriault, 2017
 License     : BSD-style
-Maintainer  : alec.theriault@gmail.com
+Maintainer  : ners <ners@gmx.ch>
 Stability   : experimental
 Portability : GHC
 -}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Language.Rust.Inline.Internal (
   emitCodeBlock,
@@ -25,14 +27,14 @@ import Language.Rust.Inline.Context
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 
-import Control.Monad               ( when ) 
+import Control.Monad               ( when, forM_ ) 
 import Data.Typeable               ( Typeable )
 import Data.Monoid                 ( Endo(..) )
 import Data.Maybe                  ( fromMaybe )
 import Data.List                   ( unfoldr )
 import Data.Char                   ( isAlpha, isAlphaNum )
 
-import System.FilePath             ( (</>), (<.>), takeExtension )
+import System.FilePath             ( (</>), (<.>), takeDirectory, takeExtension )
 import System.Directory            ( copyFile, createDirectoryIfMissing )
 import System.Process              ( spawnProcess, readProcess, waitForProcess )
 import System.Exit                 ( ExitCode(..) )
@@ -186,21 +188,24 @@ cargoFinalizer extraArgs dependencies = do
  
   -- Run Cargo again to get the static library path
   jOuts <- runIO $ readProcess "cargo" (cargoArgs ++ msgFormat) ""
-  let jOut = last (lines jOuts)
-  rustLibFp <-
-    case decode jOut of
-      Error msg -> fail ("cargoFinalizer: " ++ msg)
-      Ok jObj -> case lookup "filenames" (fromJSObject jObj) of
-                   Just (JSArray [ JSString jStr ]) -> pure (fromJSString jStr)
-                   _ -> fail ("cargoFinalizer: did not find one static library")
 
-  -- Move the library to a GHC temporary file
-  let ext = takeExtension rustLibFp
-  rustLibFp' <- addTempFile ext
-  runIO $ copyFile rustLibFp rustLibFp'
+  forM_ (lines jOuts) $ \line -> do
+    jObj <- either (\msg -> fail $ "cargoFinalizer: " ++ msg ++ ": " ++ line) (pure . fromJSObject) . resultToEither . decode $ line
+    case lookup "reason" jObj of
+      Just (JSString (fromJSString -> "compiler-artifact")) -> do
+        case lookup "filenames" jObj of
+          Just (JSArray values) -> forM_ values $ \case
+                JSString (fromJSString -> rustLibFp) -> do
+                    -- Move the library to a GHC temporary file
+                    let ext = takeExtension rustLibFp
+                    rustLibFp' <- addTempFile ext
+                    runIO $ copyFile rustLibFp rustLibFp'
 
-  -- Link in the static library
-  addForeignFilePath RawObject rustLibFp'
+                    -- Link in the static library
+                    addForeignFilePath RawObject rustLibFp'
+                _ -> pure ()
+          _ -> fail "cargoFinalizer: missing filenames"
+      _ -> pure ()
 
 -- | Error message to display when @cargo@/@rustc@ fail to compile the module's
 -- Rust file. Unfortunately, [errors reported by TH are always followed by the
@@ -236,8 +241,9 @@ fileFinalizer = do
            $ ""
 
   -- Write out the file
-  runIO $ createDirectoryIfMissing True dir
-  runIO $ writeFile (dir </> thisFile) code
+  let filepath = dir </> thisFile
+  runIO $ createDirectoryIfMissing True (takeDirectory filepath)
+  runIO $ writeFile filepath code
 
 -- | Figure out what file we are currently in.
 currentFile :: Q ( String    -- ^ package name, amended to be a valid crate name
