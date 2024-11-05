@@ -24,10 +24,9 @@ import Language.Rust.Syntax        ( Ty(BareFn, Ptr), Abi(..), FnDecl(..),
 
 import Language.Haskell.TH 
 
-import Data.Semigroup              ( Semigroup )
 import Data.Monoid                 ( First(..) )
 import Data.Typeable               ( Typeable )
-import Control.Monad               ( void, liftM2 )
+import Control.Monad               ( void )
 import Data.Traversable            ( for )
 import Data.List                   ( intercalate )
 
@@ -65,16 +64,6 @@ newtype Context =
             -- Source for the trait impls of @MarshalTo@
             )
   deriving (Semigroup, Monoid, Typeable)
-
--- | Applicative lifting of the 'Context' instance
-instance Semigroup (Q Context) where
-  (<>) = liftM2 (<>)
-
--- | Applicative lifting of the 'Context' instance
-instance Monoid (Q Context) where
-  mappend = (<>)
-  mempty = pure mempty
-  
 
 -- | Search in a 'Context' for the Haskell type corresponding to a Rust type.
 -- If the Rust type is not C-compatible, also return a C compatible type. It is
@@ -247,18 +236,15 @@ pointers = do
     ptrConT <- [t| Ptr |]
     pure (Context ([rule],[rev ptrConT],[constPtr,mutPtr]))
   where
-  rule pt context = do
-    Ptr _ t _ <- pure pt
-    (t', Nothing) <- lookupRTypeInContext t context
-    pure ([t| Ptr $t' |], Nothing)
+  rule (Ptr _ t _) context
+    | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t| Ptr $t' |], Nothing)
+  rule _ _ = mempty
 
-  rev ptrConT pt context = do
-    AppT ptrCon t <- pure pt
-    if ptrCon /= ptrConT
-      then mempty
-      else do
+  rev ptrConT (AppT ptrCon t) context
+    | ptrCon == ptrConT = do
         t' <- lookupHTypeInContext t context
         pure (Ptr Mutable <$> t' <*> pure ())
+  rev _ _ _ = mempty
 
   constPtr = unlines [ "impl<T> MarshalInto<*const T> for *const T {"
                      , "  fn marshal(self) -> *const T { self }"
@@ -286,31 +272,32 @@ functions = do
   ioT <- [t| IO |]
   pure (Context ([rule], [rev funPtrT ioT], [impl]))
   where
-  rule ft context = do
-    BareFn _ C _ (FnDecl args retTy False _) _ <- pure ft
+  rule (BareFn _ C _ (FnDecl args retTy False _) _) context = do
     args' <-
       for args $ \arg -> do
-        Arg _ argTy _ <- pure arg
-        (t', Nothing) <- lookupRTypeInContext argTy context
-        pure t'
+        argTy <- case arg of
+          Arg _ argTy _ -> pure argTy
+          _ -> mempty
+        case lookupRTypeInContext argTy context of
+          First (Just (t', Nothing)) -> pure t'
+          _ -> mempty
 
     retTy' <-
       case retTy of
         Nothing -> pure [t| IO () |]
-        Just t -> do
-          (t', Nothing) <- lookupRTypeInContext t context
-          pure t'
+        Just t ->
+          case lookupRTypeInContext t context of
+            First (Just (t', Nothing)) -> pure t'
+            _ -> mempty
 
     let hFunTy = foldr (\l r -> [t| $l -> $r |]) retTy' args'
     let hFunPtr = [t| FunPtr $hFunTy |]
 
     pure (hFunPtr, Nothing)
+  rule _ _ = mempty
 
-  rev funPtrT ioT ft context = do
-    AppT funPtr t <- pure ft
-    if funPtr /= funPtrT
-      then mempty
-      else do
+  rev funPtrT ioT (AppT funPtr t) context
+    | funPtr == funPtrT = do
         let ts = getApps t
             args = init ts
 
@@ -330,6 +317,7 @@ functions = do
             argsRs' = map (\a -> Arg Nothing a ()) <$> sequence argsRs
         let decl = FnDecl <$> argsRs' <*> sequence retRs <*> pure False <*> pure ()
         pure (BareFn Normal C [] <$> decl <*> pure ())
+  rev _ _ _ _ = mempty
 
   getApps :: Type -> [Type]
   getApps (AppT e1 e2) = e1 : getApps e2

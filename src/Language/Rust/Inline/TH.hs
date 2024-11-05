@@ -13,6 +13,7 @@ import Language.Haskell.TH.Lib ( appT, conT )
 import Language.Rust.Data.Ident ( Ident ) 
 import Language.Rust.Syntax ( Ty(PathTy), Path(..), PathSegment(..), PathParameters(..) )
 
+import Control.Monad ( unless )
 import Data.Maybe  ( isJust, fromMaybe )
 import Data.Monoid ( First, Any(..) )
 
@@ -25,27 +26,26 @@ adtCtx :: Name         -- ^ name of the 'Storable' Haskell type
 adtCtx hADT rEnum rReprCOpt n impls = pure (Context ([ goRType ], [ goHType ], impls))
   where
   goRType :: RType -> Context -> First (Q HType, Maybe (Q RType))
-  goRType rTy ctx = do
-    PathTy Nothing (Path False [ PathSegment rName params _ ] _) _ <- pure rTy
+  goRType (PathTy Nothing (Path False [ PathSegment rName params _ ] _) _) ctx = do
     rGen <-
       case params of
         Nothing -> pure []
         Just (AngleBracketed [] tys [] _) -> pure tys
-        _ -> fail "Invalid params"
+        _ -> mempty
 
     -- Filter out incorrect path types
-    () <- if rName == rEnum   then pure () else fail "Wrong name"
-    () <- if length rGen == n then pure () else fail "Wrong number of generics"
+    unless (rName == rEnum) mempty
+    unless (length rGen == n) mempty
 
     -- Look up generic args recursively
-    (hGen, rInterGenOpt) <- fmap unzip $ traverse (`lookupRTypeInContext` ctx) rGen
+    (hGen, rInterGenOpt) <- unzip <$> traverse (`lookupRTypeInContext` ctx) rGen
 
     -- Compute the intermediate #[repr(C)] rust type (if we even need one)
     let needInter = getAny $ foldMap Any (isJust rReprCOpt : map isJust rInterGenOpt)
     let rInter :: Maybe (Q RType)
         rInter = if needInter
                    then let rReprC = fromMaybe rEnum rReprCOpt
-                            rInterGen = zipWith (\x m -> maybe (pure x) id m) rGen rInterGenOpt
+                            rInterGen = zipWith (fromMaybe . pure) rGen rInterGenOpt
                         in Just (mkGenPathTy rReprC <$> sequence rInterGen)
                    else Nothing
     
@@ -53,21 +53,22 @@ adtCtx hADT rEnum rReprCOpt n impls = pure (Context ([ goRType ], [ goHType ], i
     let hTy = foldl appT (conT hADT) hGen
 
     pure (hTy, rInter)
-    
+  goRType _ _ = mempty
 
   goHType :: HType -> Context -> First (Q RType)
-  goHType hTy ctx = do
-    Just (hName, hArgs) <- pure (getTyConOpt hTy)
+  goHType hTy ctx
+    | Just (hName, hArgs) <- getTyConOpt hTy = do
 
-    -- Filter out incorrect type constructors
-    () <- if hName == hADT     then pure () else fail "Wrong name"
-    () <- if length hArgs == n then pure () else fail "Wrong number of parameters"
+        -- Filter out incorrect type constructors
+        unless (hName == hADT) mempty
+        unless (length hArgs == n) mempty
    
-    -- Look up parameters recursively
-    rGen <- traverse (`lookupHTypeInContext` ctx) hArgs
+        -- Look up parameters recursively
+        rGen <- traverse (`lookupHTypeInContext` ctx) hArgs
 
-    -- Compute the Rust type
-    pure (mkGenPathTy rEnum <$> sequence rGen)
+        -- Compute the Rust type
+        pure (mkGenPathTy rEnum <$> sequence rGen)
+  goHType _ _ = mempty
 
 -- | TODO: be flexible around naming of the generated type
 rustTyCtx :: TypeQ      -- ^ a Haskell type representing the desired Rust type

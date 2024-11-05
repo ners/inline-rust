@@ -51,9 +51,9 @@ getConstructors ty = do
 
 
 -- | Get the name of a type variable binder
-varName :: TyVarBndr -> Name
-varName (PlainTV n) = n
-varName (KindedTV n _) = n
+varName :: TyVarBndr flag -> Name
+varName (PlainTV n _) = n
+varName (KindedTV n _ _) = n
 
 -- | Apply a substitution (of type variable to type) to a type
 subTy :: [(Name, Type)] -> Type -> Type

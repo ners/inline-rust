@@ -27,8 +27,9 @@ import Language.Rust.Syntax
 
 import Foreign.Storable
 
-import Control.Monad ( join )
+import Control.Monad ( join, unless )
 import Data.List     ( intercalate )
+import Data.Maybe    ( fromMaybe )
 
 -- Some 'Storable' instances
 --
@@ -61,20 +62,17 @@ maybeContext = do
     maybeConT <- [t| Maybe |]
     pure (Context ([rule],[rev maybeConT],maybeItems))
   where
-  rule pt context = do
-    PathTy Nothing (Path False [PathSegment "Option" (Just (AngleBracketed [] [t] [] _)) _] _) _ <- pure pt
+  rule (PathTy Nothing (Path False [PathSegment "Option" (Just (AngleBracketed [] [t] [] _)) _] _) _) context = do
     (t', rInterOpt) <- lookupRTypeInContext t context
     let inter = mkGenPathTy "MaybeC" <$> ((\x -> [x]) <$> maybe (pure t) id rInterOpt)
     pure ([t| Maybe $t' |], Just inter)
+  rule _ _ = mempty
 
-
-  rev maybeConT pt context = do
-    AppT maybeCon t <- pure pt
-    if maybeCon /= maybeConT
-      then mempty
-      else do
+  rev maybeConT (AppT maybeCon t) context
+    | maybeCon == maybeConT = do
         t' <- lookupHTypeInContext t context
         pure (fmap (\x -> PathTy Nothing (Path False [PathSegment "Option" (Just (AngleBracketed [] [x] [] ())) ()] ()) ()) t')
+  rev _ _ _ = mempty
 
 -- | Context for 'Either' type
 eitherContext :: Q Context
@@ -82,41 +80,38 @@ eitherContext = do
     eitherConT <- [t| Either |]
     pure (Context ([rule],[rev eitherConT],eitherItems))
   where
-  rule pt context = do
-    PathTy Nothing (Path False [PathSegment "Result" (Just (AngleBracketed [] [l,r] [] _)) _] _) _ <- pure pt
+  rule (PathTy Nothing (Path False [PathSegment "Result" (Just (AngleBracketed [] [l,r] [] _)) _] _) _) context = do
     (l', lInter) <- lookupRTypeInContext l context
     (r', rInter) <- lookupRTypeInContext r context
-    let inter = mkGenPathTy "EitherC" <$> ((\x y -> [x,y]) <$> maybe (pure r) id rInter
-                                                           <*> maybe (pure l) id lInter)
+    let inter = mkGenPathTy "EitherC" <$> ((\x y -> [x,y]) <$> fromMaybe (pure r) rInter
+                                                           <*> fromMaybe (pure l) lInter)
     pure ([t| Either $r' $l' |], Just inter)
+  rule _ _ = mempty
 
-  rev eitherConT pt context = do
-    AppT (AppT eitherCon l) r <- pure pt
-    if eitherCon /= eitherConT
-      then mempty
-      else do
+  rev eitherConT (AppT (AppT eitherCon l) r) context
+    | eitherCon == eitherConT = do
         l' <- lookupHTypeInContext l context
         r' <- lookupHTypeInContext r context
         pure ((\x y -> PathTy Nothing (Path False [PathSegment "Result" (Just (AngleBracketed [] [x,y] [] ())) ()] ()) ()) <$> r' <*> l')
+  rev _ _ _ = mempty
 
 -- | Context for tuple types
 tupleContext :: Int -> Q Context
 tupleContext n = pure (Context ([rule],[rev],tupleItems n))
   where
-  rule pt ctx = do
-    TupTy tys _ <- pure pt
-
+  rule (TupTy tys _) ctx = do
     -- Filter out incorrect tuple types
-    () <- if length tys == n then pure () else fail "Wrong sized tuple"
+    unless (length tys == n) mempty
 
-    (tys', tysInter) <- fmap unzip $ traverse (`lookupRTypeInContext` ctx) tys
+    (tys', tysInter) <- unzip <$> traverse (`lookupRTypeInContext` ctx) tys
 
-    let tysGen = zipWith (\x m -> maybe (pure x) id m) tys tysInter
+    let tysGen = zipWith (fromMaybe . pure) tys tysInter
         inter = mkGenPathTy (mkIdent ("Tuple" ++ show n)) <$> sequence tysGen
     pure (foldl appT (tupleT n) tys', Just inter)
+  rule _ _ = mempty
 
   rev pt ctx = do
-    Just tys <- pure (getTupTy [] pt)
+    tys <- maybe mempty pure $ getTupTy [] pt
 
     -- Look up parameters recursively
     tys' <- traverse (`lookupHTypeInContext` ctx) tys

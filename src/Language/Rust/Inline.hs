@@ -241,7 +241,7 @@ rustQuasiQuoter safety isPure supportDecs = QuasiQuoter { quoteExp = expQuoter
     who | supportDecs = "expressions and declarations"
         | otherwise   = "expressions"
 
-    err = fail ("(inline-rust): Only " ++ who ++ " can be quasiquoted")
+    err = const $ fail ("(inline-rust): Only " ++ who ++ " can be quasiquoted")
 
     expQuoter qq = do
       parsed <- parseQQ qq

@@ -192,6 +192,10 @@ impl StructLike2 {
 }
 |]
 
+instance Functor (These a) where
+    fmap f (This a) = This a
+    fmap f (That b) = That $ f b
+    fmap f (Both a b) = Both a (f b)
 
 instance Bifunctor These where
   bimap f _ (This x) = This (f x)

@@ -1,0 +1,44 @@
+{
+  "nodes": {
+    "language-rust": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1729283594,
+        "narHash": "sha256-nVexe9Jrj0DtpjyPX+S2t/Op2iJyU1IRncW/BO8Ties=",
+        "owner": "GaloisInc",
+        "repo": "language-rust",
+        "rev": "ae59c7355b2fbbe818c1fdd23894df6bfa0432e5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "GaloisInc",
+        "repo": "language-rust",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1730531603,
+        "narHash": "sha256-Dqg6si5CqIzm87sp57j5nTaeBbWhHFaVyG7V6L8k3lY=",
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "7ffd9ae656aec493492b44d0ddfb28e79a1ea25d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "language-rust": "language-rust",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
