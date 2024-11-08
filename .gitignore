@@ -19,3 +19,9 @@ stack.yaml
 **/*.dyn_hi
 .DS_Store
 .ghc.environment*
+
+# Nix
+.direnv
+.envrc
+result
+result-*
