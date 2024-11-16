@@ -276,6 +276,8 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
   qqName <- newName (show qqName')
   let qqStrName = show qqName
 
+  recordFFIName qqStrName
+
   -- Find out what the corresponding Haskell representations are for the
   -- argument and return types
   let (rustArgNames, rustArgs) = unzip rustNamedArgs 

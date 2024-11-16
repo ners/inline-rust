@@ -9,10 +9,13 @@ Portability : GHC
 -}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Language.Rust.Inline.Internal (
+  currentFile,
   emitCodeBlock,
+  recordFFIName,
   getRType,
   getHType,
   getContext,
@@ -27,7 +30,7 @@ import Language.Rust.Inline.Context
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 
-import Control.Monad               ( when, forM_ ) 
+import Control.Monad               ( when, forM, forM_ ) 
 import Data.Typeable               ( Typeable )
 import Data.Monoid                 ( Endo(..) )
 import Data.Maybe                  ( fromMaybe )
@@ -35,7 +38,7 @@ import Data.List                   ( unfoldr )
 import Data.Char                   ( isAlpha, isAlphaNum )
 
 import System.FilePath             ( (</>), (<.>), takeDirectory, takeExtension )
-import System.Directory            ( copyFile, createDirectoryIfMissing )
+import System.Directory            ( copyFile, createDirectoryIfMissing, getDirectoryContents )
 import System.Process              ( spawnProcess, readProcess, waitForProcess )
 import System.Exit                 ( ExitCode(..) )
 import System.Environment          ( setEnv )
@@ -52,6 +55,8 @@ import Text.JSON
 newtype CodeBlocks = CodeBlocks { showsCodeBlocks :: ShowS }
   deriving ( Typeable )
 
+newtype FFINames = FFINames [String]
+  deriving ( Typeable )
 
 -- | Initialize the 'CodeBlocks' of the current module. Crash if it is already
 -- intialized. This must be called exactly once.
@@ -73,12 +78,19 @@ initCodeBlocks dependenciesOpt = do
   -- add a module state
   putQ (CodeBlocks id)
 
+  putQ (FFINames [])
+
 -- | Emit a raw 'String' of Rust code into the current 'ModuleState'.
 emitCodeBlock :: String -> Q [Dec]
 emitCodeBlock code = do
   Just (CodeBlocks cbs) <- getQ 
   putQ (CodeBlocks (cbs . showString code . showString "\n"))
   pure []
+
+recordFFIName :: String -> Q ()
+recordFFIName name = do
+  Just (FFINames names) <- getQ
+  putQ (FFINames (name : names))
 
 -- | Freeze the context and begin the part of the module which can contain Rust
 -- quasiquotes. If this module is also the crate root, use 'setCrateRoot'
@@ -143,6 +155,16 @@ cargoFinalizer extraArgs dependencies = do
   let dir = ".inline-rust" </> pkg
       thisFile = foldr1 (</>) mods <.> "rs"
       crate = "quasiquote_" ++ pkg
+
+  nameFiles <- map (dir </>) . filter ((".ffinames" ==) . takeExtension) <$> runIO (getDirectoryContents dir)
+  runIO $ print nameFiles
+  names <- runIO $ concat <$> forM nameFiles (fmap lines . readFile)
+  runIO $ print names
+  ffiFakeSig <- [t| IO () |]
+  forM_ names $ \name -> do
+    name' <- newName $ name <> "_fake"
+    let ffiImport = ForeignD (ImportF CCall Unsafe name name' ffiFakeSig)
+    addTopDecls [ffiImport]
 
   -- Make contents of a @Cargo.toml@ file
   let cargoToml = dir </> "Cargo" <.> "toml"
@@ -226,7 +248,7 @@ fileFinalizer = do
   (pkg, mods) <- currentFile
 
   let dir = ".inline-rust" </> pkg
-      thisFile = foldr1 (</>) mods <.> "rs"
+      thisFile = foldr1 (</>) mods
 
   -- Figure out what we are putting into this file 
   Just cb <- getQ
@@ -241,9 +263,14 @@ fileFinalizer = do
            $ ""
 
   -- Write out the file
-  let filepath = dir </> thisFile
-  runIO $ createDirectoryIfMissing True (takeDirectory filepath)
-  runIO $ writeFile filepath code
+  let filepath = dir </> thisFile <.> "rs"
+  runIO $ do
+    createDirectoryIfMissing True $ takeDirectory filepath
+    writeFile filepath code
+
+  Just (FFINames names) <- getQ
+  let namesFile = dir </> foldr1 (<.>) mods <.> "ffinames"
+  runIO . writeFile namesFile . unlines $ names
 
 -- | Figure out what file we are currently in.
 currentFile :: Q ( String    -- ^ package name, amended to be a valid crate name
