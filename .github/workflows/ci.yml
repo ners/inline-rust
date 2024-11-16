@@ -1,0 +1,24 @@
+name: Continuous integration
+on:
+  push:
+    branches: master
+  pull_request:
+    branches: master
+  workflow_call:
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: cachix/install-nix-action@v30
+    - uses: ryanccn/attic-action@v0
+      with:
+        endpoint: https://cache.ners.ch
+        cache: haskell
+        token: ${{ secrets.ATTIC_TOKEN }}
+    - name: Nix check
+      run: nix flake check --accept-flake-config
+    - name: Nix build
+      run: nix build --accept-flake-config
