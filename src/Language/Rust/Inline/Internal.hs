@@ -34,7 +34,7 @@ import Control.Monad               ( when, forM, forM_ )
 import Data.Typeable               ( Typeable )
 import Data.Monoid                 ( Endo(..) )
 import Data.Maybe                  ( fromMaybe )
-import Data.List                   ( unfoldr, intercalate )
+import Data.List                   ( nub, unfoldr )
 import Data.Char                   ( isAlpha, isAlphaNum, isUpperCase )
 
 import System.FilePath             ( (</>), (<.>), takeBaseName, takeDirectory, takeExtension )
@@ -72,8 +72,8 @@ initCodeBlocks dependenciesOpt = do
   
   -- add hooks for writing out files (and possibly compiling the project)
   let finalizer = case dependenciesOpt of
-                    Nothing -> fileFinalizer True
-                    Just deps -> fileFinalizer False *> cargoFinalizer [] deps
+                    Nothing -> fileFinalizer
+                    Just deps -> fileFinalizer *> cargoFinalizer [] deps
   addModFinalizer finalizer
 
   -- add a module state
@@ -159,23 +159,19 @@ cargoFinalizer extraArgs dependencies = do
   nameFiles <- filter ((".ffinames" ==) . takeExtension) <$> runIO (listFilesRecursive srcDir)
 
   let modDir dir = do
-        let parentMod =
-                case takeBaseName dir of
-                    "src" -> ""
-                    foo -> foo
         subdirs <- listDirectories dir
         mapM_ modDir subdirs
         srcs <- filter (\file -> takeExtension file == ".rs" && isUpperCase (head $ takeBaseName file)) <$> listFiles dir
-        let modules = takeBaseName <$> (subdirs <> srcs)
-        writeFile (dir </> "mod.rs") . unlines . concat $ [ ["", "pub mod " <> name <> ";", "pub use " <> fullName <> "::*;"]
+        let modules = nub $ takeBaseName <$> (subdirs <> srcs)
+        writeFile (dir </> "mod.rs") . unlines . concat $ [ ["", "pub mod " <> name <> ";", "pub use self::" <> name <> "::*;"]
                                                           | name <- modules
-                                                          , let fullName = intercalate "::" [parentMod, name]
                                                           ]
 
   runIO $ do
     modDir srcDir
-    readFile (srcDir </> "mod.rs") >>= appendFile (srcDir </> "lib.rs")
+    modules <- readFile (srcDir </> "mod.rs")
     removeFile $ srcDir </> "mod.rs"
+    writeFile (srcDir </> "lib.rs") $ "#![allow(warnings)]\n\n" <> modules
 
   names <- runIO $ concat <$> forM nameFiles (fmap lines . readFile)
   ffiFakeSig <- [t| IO () |]
@@ -189,6 +185,7 @@ cargoFinalizer extraArgs dependencies = do
       cargoSrc = unlines [ "[package]"
                          , "name = \"" ++ crate ++ "\""
                          , "version = \"0.0.0\""
+                         , "edition = \"2021\""
 
                          , "[dependencies]"
                          , unlines [ name ++ " = \"" ++ version ++ "\""
@@ -260,13 +257,13 @@ rustcErrMsg = "Rust source file associated with this module failed to compile"
 -- a module. This emits into a file in the @.inline-rust@ directory all of the
 -- Rust code we have produced while processing the current files contexts and
 -- quasiquotes.
-fileFinalizer :: Bool -> Q ()
-fileFinalizer submodule = do
+fileFinalizer :: Q ()
+fileFinalizer = do
   (pkg, mods) <- currentFile
 
   let pkgDir = ".inline-rust" </> pkg
       srcDir = pkgDir </> "src"
-      thisFile = if submodule then foldr1 (</>) mods else "lib"
+      thisFile = foldr1 (</>) mods
 
   -- Figure out what we are putting into this file 
   Just cb <- getQ
