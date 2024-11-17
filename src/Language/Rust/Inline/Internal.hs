@@ -30,16 +30,15 @@ import Language.Rust.Inline.Context
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 
-import Control.Monad               ( when, forM, forM_ ) 
+import Control.Monad               ( filterM, forM, forM_, when )
 import Data.Typeable               ( Typeable )
 import Data.Monoid                 ( Endo(..) )
 import Data.Maybe                  ( fromMaybe )
 import Data.List                   ( nub, unfoldr )
-import Data.Char                   ( isAlpha, isAlphaNum, isUpperCase )
+import Data.Char                   ( isAlpha, isAlphaNum, isUpper )
 
 import System.FilePath             ( (</>), (<.>), takeBaseName, takeDirectory, takeExtension )
-import System.Directory            ( copyFile, removeFile, createDirectoryIfMissing )
-import System.Directory.Extra      ( listFilesRecursive, listDirectories, listFiles )
+import System.Directory            ( copyFile, removeFile, createDirectoryIfMissing, listDirectory, doesDirectoryExist, doesFileExist )
 import System.Process              ( spawnProcess, readProcess, waitForProcess )
 import System.Exit                 ( ExitCode(..) )
 import System.Environment          ( setEnv )
@@ -62,14 +61,14 @@ newtype FFINames = FFINames [String]
 -- | Initialize the 'CodeBlocks' of the current module. Crash if it is already
 -- intialized. This must be called exactly once.
 initCodeBlocks :: Maybe [(String,String)]  -- ^ dependencies, if crate root
-               -> Q () 
+               -> Q ()
 initCodeBlocks dependenciesOpt = do
   -- check if there is already something there
   cb <- getQ
   case cb of
     Nothing -> pure ()
     Just (CodeBlocks _) -> fail "initCodeBlocks: CodeBlocks already initialized"
-  
+
   -- add hooks for writing out files (and possibly compiling the project)
   let finalizer = case dependenciesOpt of
                     Nothing -> fileFinalizer
@@ -84,7 +83,7 @@ initCodeBlocks dependenciesOpt = do
 -- | Emit a raw 'String' of Rust code into the current 'ModuleState'.
 emitCodeBlock :: String -> Q [Dec]
 emitCodeBlock code = do
-  Just (CodeBlocks cbs) <- getQ 
+  Just (CodeBlocks cbs) <- getQ
   putQ (CodeBlocks (cbs . showString code . showString "\n"))
   pure []
 
@@ -125,7 +124,7 @@ extendContext :: Q Context -> Q [Dec]
 extendContext qExtension = do
   extension <- qExtension
   ctx <- getContext
-  putQ (ctx <> extension) 
+  putQ (ctx <> extension)
   pure []
 
 -- | Search in a 'Context' for the Haskell type corresponding to a Rust type.
@@ -156,16 +155,23 @@ cargoFinalizer extraArgs dependencies = do
       srcDir = pkgDir </> "src"
       crate = "quasiquote_" ++ pkg
 
-  nameFiles <- filter ((".ffinames" ==) . takeExtension) <$> runIO (listFilesRecursive srcDir)
+  nameFiles <- fmap (srcDir </>) . filter ((".ffinames" ==) . takeExtension) <$> runIO (listDirectory srcDir)
 
   let modDir dir = do
-        subdirs <- listDirectories dir
-        mapM_ modDir subdirs
-        srcs <- filter (\file -> takeExtension file == ".rs" && isUpperCase (head $ takeBaseName file)) <$> listFiles dir
-        let modules = nub $ takeBaseName <$> (subdirs <> srcs)
-        writeFile (dir </> "mod.rs") . unlines . concat $ [ ["", "pub mod " <> name <> ";", "pub use self::" <> name <> "::*;"]
+        entries <- fmap (dir </>) <$> listDirectory dir
+        modDirs <- filterM doesDirectoryExist entries
+        let modSrcs = filter (\f -> takeExtension f == ".rs" && isUpper (head $ takeBaseName f)) entries
+        mapM_ modDir modDirs
+        let modules = nub $ takeBaseName <$> (modDirs <> modSrcs)
+        writeFile (dir </> "mod.rs") . unlines . concat $ [ ["pub mod " <> name <> ";", "pub use self::" <> name <> "::*;", ""]
                                                           | name <- modules
                                                           ]
+        let currentModSrc = takeDirectory dir </> (takeBaseName dir <.> "rs")
+        currentModSrcExists <- doesFileExist currentModSrc
+        when currentModSrcExists $ do
+            currentModContents <- readFile currentModSrc
+            removeFile currentModSrc
+            appendFile (dir </> "mod.rs") currentModContents
 
   runIO $ do
     modDir srcDir
@@ -216,13 +222,13 @@ cargoFinalizer extraArgs dependencies = do
   let cargoArgs = [ "build"
                   , "--release"
                   , "--manifest-path=" ++ cargoToml
-                  ] ++ extraArgs 
+                  ] ++ extraArgs
       msgFormat = [ "--message-format=json" ]
 
   ec <- runIO $ spawnProcess "cargo" cargoArgs >>= waitForProcess
   when (ec /= ExitSuccess)
     (reportError rustcErrMsg)
- 
+
   -- Run Cargo again to get the static library path
   jOuts <- runIO $ readProcess "cargo" (cargoArgs ++ msgFormat) ""
 
@@ -263,12 +269,12 @@ fileFinalizer = do
 
   let pkgDir = ".inline-rust" </> pkg
       srcDir = pkgDir </> "src"
-      thisFile = foldr1 (</>) mods
+      modDir = foldr1 (</>) mods
 
   -- Figure out what we are putting into this file 
   Just cb <- getQ
   Just (Context (_,_,impls)) <- getQ
-  let code = showsCodeBlocks cb 
+  let code = showsCodeBlocks cb
            . showString "pub mod marshal {\n"
            . showString "#[allow(unused_imports)] use super::*;\n"
            . showString "pub trait MarshalInto<T> { fn marshal(self) -> T; }\n"
@@ -278,8 +284,8 @@ fileFinalizer = do
            $ ""
 
   -- Write out the file
-  let filepath = srcDir </> thisFile <.> "rs"
-  let namesFile = srcDir </> thisFile <.> "ffinames"
+  let filepath = srcDir </> modDir <.> ".rs"
+  let namesFile = srcDir </> foldr1 (<.>) mods <.> "ffinames"
   Just (FFINames names) <- getQ
   runIO $ do
     createDirectoryIfMissing True $ takeDirectory filepath

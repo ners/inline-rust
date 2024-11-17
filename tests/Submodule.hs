@@ -1,7 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Submodule.Submodule where
+module Submodule where
 
 import Data.Int
 import Data.Word
@@ -11,5 +11,5 @@ import Test.Hspec
 extendContext basic
 setCrateModule
 
-subsubmoduleTest :: Spec
-subsubmoduleTest = describe "Subsubmodules" $ it "Can link against subsubmodules" $ [rust| i32 { 42 } |] `shouldBe` 42
+submoduleTest :: Spec
+submoduleTest = describe "Submodules" $ it "Can link against submodules" $ [rust| i32 { 42 } |] `shouldBe` 42

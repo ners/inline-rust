@@ -47,7 +47,6 @@ library
                      , ScopedTypeVariables
 
   build-depends:       base                 >=4.9 && <5.0
-                     , extra                >=0.5
                      , language-rust        >=0.2.0
                      , prettyprinter        >=1.1
                      , process              >=1.4
@@ -82,6 +81,7 @@ test-suite spec
                      , FunctionPointerTypes
                      , PreludeTypes
                      , AlgebraicDataTypes
+                     , Submodule
                      , Submodule.Submodule
   build-depends:       base
                      , inline-rust
