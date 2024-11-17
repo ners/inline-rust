@@ -217,9 +217,8 @@ cargoFinalizer extraArgs dependencies = do
       Just (JSString (fromJSString -> "compiler-artifact")) -> do
         case lookup "filenames" jObj of
           Just (JSArray values) -> forM_ values $ \case
-                JSString (fromJSString -> rustLibFp) -> do
+                JSString (fromJSString -> rustLibFp) | ext <- takeExtension rustLibFp, ext `elem` [".a", ".o"] -> do
                     -- Move the library to a GHC temporary file
-                    let ext = takeExtension rustLibFp
                     rustLibFp' <- addTempFile ext
                     runIO $ copyFile rustLibFp rustLibFp'
 
