@@ -82,6 +82,7 @@ test-suite spec
                      , FunctionPointerTypes
                      , PreludeTypes
                      , AlgebraicDataTypes
+                     , Submodule.Submodule
   build-depends:       base
                      , inline-rust
                      , language-rust

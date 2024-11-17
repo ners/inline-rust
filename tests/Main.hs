@@ -16,6 +16,7 @@ import PointerTypes
 import FunctionPointerTypes
 import PreludeTypes
 import AlgebraicDataTypes
+import Submodule.Submodule
 import Data.Word
 import Test.Hspec
 import Foreign.Storable
@@ -33,4 +34,4 @@ main = hspec $
     funcPointerTypes
     preludeTypes
     algebraicDataTypes
-
+    submoduleTest

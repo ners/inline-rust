@@ -34,7 +34,7 @@ import Control.Monad               ( when, forM, forM_ )
 import Data.Typeable               ( Typeable )
 import Data.Monoid                 ( Endo(..) )
 import Data.Maybe                  ( fromMaybe )
-import Data.List                   ( unfoldr )
+import Data.List                   ( unfoldr, intercalate )
 import Data.Char                   ( isAlpha, isAlphaNum, isUpperCase )
 
 import System.FilePath             ( (</>), (<.>), takeBaseName, takeDirectory, takeExtension )
@@ -159,12 +159,17 @@ cargoFinalizer extraArgs dependencies = do
   nameFiles <- filter ((".ffinames" ==) . takeExtension) <$> runIO (listFilesRecursive srcDir)
 
   let modDir dir = do
+        let parentMod =
+                case takeBaseName dir of
+                    "src" -> ""
+                    foo -> foo
         subdirs <- listDirectories dir
-        mapM_ modDir $ (dir </>) <$> subdirs
+        mapM_ modDir subdirs
         srcs <- filter (\file -> takeExtension file == ".rs" && isUpperCase (head $ takeBaseName file)) <$> listFiles dir
         let modules = takeBaseName <$> (subdirs <> srcs)
-        writeFile (dir </> "mod.rs") . unlines . concat $ [ ["", "pub mod " <> name <> ";", "pub use " <> name <> "::*;"]
+        writeFile (dir </> "mod.rs") . unlines . concat $ [ ["", "pub mod " <> name <> ";", "pub use " <> fullName <> "::*;"]
                                                           | name <- modules
+                                                          , let fullName = intercalate "::" [parentMod, name]
                                                           ]
 
   runIO $ do
