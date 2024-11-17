@@ -24,22 +24,6 @@ import Foreign.Marshal.Array
 extendContext basic
 setCrateRoot []
 
-[rust|
-mod GhcUnboxedTypes;
-mod SimpleTypes;
-mod PointerTypes;
-mod FunctionPointerTypes;
-mod PreludeTypes;
-mod AlgebraicDataTypes;
-
-pub use GhcUnboxedTypes::*;
-pub use SimpleTypes::*;
-pub use PointerTypes::*;
-pub use FunctionPointerTypes::*;
-pub use PreludeTypes::*;
-pub use AlgebraicDataTypes::*;
-|]
-
 main :: IO ()
 main = hspec $
   describe "Rust quasiquoter" $ do

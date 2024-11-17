@@ -35,10 +35,11 @@ import Data.Typeable               ( Typeable )
 import Data.Monoid                 ( Endo(..) )
 import Data.Maybe                  ( fromMaybe )
 import Data.List                   ( unfoldr )
-import Data.Char                   ( isAlpha, isAlphaNum )
+import Data.Char                   ( isAlpha, isAlphaNum, isUpperCase )
 
-import System.FilePath             ( (</>), (<.>), takeDirectory, takeExtension )
-import System.Directory            ( copyFile, createDirectoryIfMissing, getDirectoryContents )
+import System.FilePath             ( (</>), (<.>), takeBaseName, takeDirectory, takeExtension )
+import System.Directory            ( copyFile, removeFile, createDirectoryIfMissing )
+import System.Directory.Extra      ( listFilesRecursive, listDirectories, listFiles )
 import System.Process              ( spawnProcess, readProcess, waitForProcess )
 import System.Exit                 ( ExitCode(..) )
 import System.Environment          ( setEnv )
@@ -71,8 +72,8 @@ initCodeBlocks dependenciesOpt = do
   
   -- add hooks for writing out files (and possibly compiling the project)
   let finalizer = case dependenciesOpt of
-                    Nothing -> fileFinalizer 
-                    Just deps -> fileFinalizer *> cargoFinalizer [] deps
+                    Nothing -> fileFinalizer True
+                    Just deps -> fileFinalizer False *> cargoFinalizer [] deps
   addModFinalizer finalizer
 
   -- add a module state
@@ -137,7 +138,6 @@ getRType rustType = do
 getHType :: HType -> Q RType
 getHType haskType = getHTypeInContext haskType =<< getContext
 
-
 -- * Finalizers
 
 -- | A finalizer to run Cargo and link in the static library. This function
@@ -150,16 +150,29 @@ cargoFinalizer :: [String]           -- ^ Extra @cargo@ arguments
                -> [(String, String)] -- ^ Dependencies
                -> Q ()
 cargoFinalizer extraArgs dependencies = do
-  (pkg, mods) <- currentFile
+  (pkg, _) <- currentFile
 
-  let dir = ".inline-rust" </> pkg
-      thisFile = foldr1 (</>) mods <.> "rs"
+  let pkgDir = ".inline-rust" </> pkg
+      srcDir = pkgDir </> "src"
       crate = "quasiquote_" ++ pkg
 
-  nameFiles <- map (dir </>) . filter ((".ffinames" ==) . takeExtension) <$> runIO (getDirectoryContents dir)
-  runIO $ print nameFiles
+  nameFiles <- filter ((".ffinames" ==) . takeExtension) <$> runIO (listFilesRecursive srcDir)
+
+  let modDir dir = do
+        subdirs <- listDirectories dir
+        mapM_ modDir $ (dir </>) <$> subdirs
+        srcs <- filter (\file -> takeExtension file == ".rs" && isUpperCase (head $ takeBaseName file)) <$> listFiles dir
+        let modules = takeBaseName <$> (subdirs <> srcs)
+        writeFile (dir </> "mod.rs") . unlines . concat $ [ ["", "pub mod " <> name <> ";", "pub use " <> name <> "::*;"]
+                                                          | name <- modules
+                                                          ]
+
+  runIO $ do
+    modDir srcDir
+    readFile (srcDir </> "mod.rs") >>= appendFile (srcDir </> "lib.rs")
+    removeFile $ srcDir </> "mod.rs"
+
   names <- runIO $ concat <$> forM nameFiles (fmap lines . readFile)
-  runIO $ print names
   ffiFakeSig <- [t| IO () |]
   forM_ names $ \name -> do
     name' <- newName $ name <> "_fake"
@@ -167,7 +180,7 @@ cargoFinalizer extraArgs dependencies = do
     addTopDecls [ffiImport]
 
   -- Make contents of a @Cargo.toml@ file
-  let cargoToml = dir </> "Cargo" <.> "toml"
+  let cargoToml = pkgDir </> "Cargo" <.> "toml"
       cargoSrc = unlines [ "[package]"
                          , "name = \"" ++ crate ++ "\""
                          , "version = \"0.0.0\""
@@ -178,11 +191,11 @@ cargoFinalizer extraArgs dependencies = do
                                    ]
 
                          , "[lib]"
-                         , "path = \"" ++ thisFile ++ "\""
                          , "crate-type = [\"staticlib\"]"
                          ]
-  runIO $ createDirectoryIfMissing True dir
-  runIO $ writeFile cargoToml cargoSrc
+  runIO $ do
+    createDirectoryIfMissing True pkgDir
+    writeFile cargoToml cargoSrc
 
   -- Run Cargo to compile the project
   --
@@ -242,12 +255,13 @@ rustcErrMsg = "Rust source file associated with this module failed to compile"
 -- a module. This emits into a file in the @.inline-rust@ directory all of the
 -- Rust code we have produced while processing the current files contexts and
 -- quasiquotes.
-fileFinalizer :: Q ()
-fileFinalizer = do
+fileFinalizer :: Bool -> Q ()
+fileFinalizer submodule = do
   (pkg, mods) <- currentFile
 
-  let dir = ".inline-rust" </> pkg
-      thisFile = foldr1 (</>) mods
+  let pkgDir = ".inline-rust" </> pkg
+      srcDir = pkgDir </> "src"
+      thisFile = if submodule then foldr1 (</>) mods else "lib"
 
   -- Figure out what we are putting into this file 
   Just cb <- getQ
@@ -262,14 +276,13 @@ fileFinalizer = do
            $ ""
 
   -- Write out the file
-  let filepath = dir </> thisFile <.> "rs"
+  let filepath = srcDir </> thisFile <.> "rs"
+  let namesFile = srcDir </> thisFile <.> "ffinames"
+  Just (FFINames names) <- getQ
   runIO $ do
     createDirectoryIfMissing True $ takeDirectory filepath
     writeFile filepath code
-
-  Just (FFINames names) <- getQ
-  let namesFile = dir </> foldr1 (<.>) mods <.> "ffinames"
-  runIO . writeFile namesFile . unlines $ names
+    writeFile namesFile . unlines $ names
 
 -- | Figure out what file we are currently in.
 currentFile :: Q ( String    -- ^ package name, amended to be a valid crate name
@@ -289,5 +302,3 @@ currentFile = do
     splitDots = unfoldr splitDot
     splitDot s | null s = Nothing
                | otherwise = let (x,r) = break (== '.') s in Just (x,drop 1 r)
-
-
