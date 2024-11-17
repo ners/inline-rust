@@ -145,6 +145,24 @@ singleton rts qht = mkContext [(rts, qht, True)]
 
 -- * Some handy contexts
 
+-- | Types defined in 'Foreign.C.Types' and the 'std::ffi' module.
+ffi :: Q Context
+ffi = mkContext
+    [ ([ty| std::ffi::c_char      |], [t| CChar   |], False)
+    , ([ty| std::ffi::c_double    |], [t| CDouble |], False)
+    , ([ty| std::ffi::c_float     |], [t| CFloat  |], False)
+    , ([ty| std::ffi::c_int       |], [t| CInt    |], False)
+    , ([ty| std::ffi::c_long      |], [t| CLong   |], False)
+    , ([ty| std::ffi::c_longlong  |], [t| CLLong  |], False)
+    , ([ty| std::ffi::c_schar     |], [t| CSChar  |], False)
+    , ([ty| std::ffi::c_short     |], [t| CShort  |], False)
+    , ([ty| std::ffi::c_uchar     |], [t| CUChar  |], False)
+    , ([ty| std::ffi::c_uint      |], [t| CUInt   |], False)
+    , ([ty| std::ffi::c_ulong     |], [t| CULong  |], False)
+    , ([ty| std::ffi::c_ulonglong |], [t| CULLong |], False)
+    , ([ty| std::ffi::c_ushort    |], [t| CUShort |], False)
+    ]
+
 -- | Types defined in 'Foreign.C.Types' and the 'libc' crate.
 --
 -- There should be no conversion required here - these have /identical/ memory

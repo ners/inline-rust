@@ -51,6 +51,7 @@ module Language.Rust.Inline (
   getHTypeInContext,
   -- ** Built-in contexts
   basic,
+  ffi,
   libc,
   ghcUnboxed,
   functions,
