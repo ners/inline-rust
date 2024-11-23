@@ -83,8 +83,10 @@ test-suite spec
                      , AlgebraicDataTypes
                      , Submodule
                      , Submodule.Submodule
+                     , ByteStrings
   build-depends:       base
                      , inline-rust
                      , language-rust
                      , hspec
                      , ghc-prim
+                     , bytestring

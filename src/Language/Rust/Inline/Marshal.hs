@@ -36,7 +36,11 @@ data MarshalForm
   = UnboxedDirect      -- ^ value is marshallable and must be passed directly to the FFI
   | BoxedDirect        -- ^ value is marshallable and can be passed directly to the FFI
   | BoxedIndirect      -- ^ value isn't marshallable directly but may be passed indirectly via a 'Ptr'
+  | ByteString
   deriving (Eq)
+
+passByValue :: MarshalForm -> Bool
+passByValue = (`elem` [UnboxedDirect, BoxedDirect])
 
 -- | Identify which types can be marshalled by the GHC FFI and which types are
 -- unlifted. A negative response to the first of these questions doesn't mean
@@ -51,10 +55,12 @@ ghcMarshallable ty = do
    simpleB <- sequence qSimpleBoxed
    tyconsU <- sequence qTyconsUnboxed
    tyconsB <- sequence qTyconsBoxed
+   bytestring <- [t| ByteString |]
 
    case ty of
      _          | ty  `elem` simpleU -> pure UnboxedDirect
                 | ty  `elem` simpleB -> pure BoxedDirect
+                | ty == bytestring   -> pure ByteString
      AppT con _ | con `elem` tyconsU -> pure UnboxedDirect
                 | con `elem` tyconsB -> pure BoxedDirect
      _                               -> pure BoxedIndirect

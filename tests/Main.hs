@@ -16,6 +16,7 @@ import PointerTypes
 import FunctionPointerTypes
 import PreludeTypes
 import AlgebraicDataTypes
+import ByteStrings
 import Submodule
 import Submodule.Submodule
 import Data.Word
@@ -37,3 +38,4 @@ main = hspec $
     algebraicDataTypes
     submoduleTest
     subsubmoduleTest
+    bytestringSpec
