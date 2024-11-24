@@ -319,8 +319,6 @@ foreignPointers = do
     foreignPtrT <- [t|ForeignPtr|]
     pure $ Context ([rule], [rev foreignPtrT], [foreignPtr, constPtr, mutPtr])
   where
-    rule (Ptr _ t _) context
-        | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
     rule (Rptr _ _ t _) context
         | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
     rule (PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _) context
@@ -330,25 +328,17 @@ foreignPointers = do
             pure ([t|Maybe (ForeignPtr $t')|], pure . pure $ PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] ())) ()] ()) ())
     rule _ _ = mempty
 
-    rev foreignPtrT (AppT foreignPtr t) context
-        | foreignPtr == foreignPtrT = do
-            t' <- lookupHTypeInContext t context
-            pure (Ptr Mutable <$> t' <*> pure ())
     rev _ _ _ = mempty
 
     foreignPtr =
         unlines
             [ "#[repr(C)]"
-            , "pub struct ForeignPtr<T>(*mut T, extern \"C\" fn (*mut T));"
+            , "pub struct ForeignPtr<T>(pub *mut T, pub extern \"C\" fn (*mut T));"
             ]
 
     constPtr =
         unlines
-            [ "impl<T> MarshalInto<*const T> for *const T {"
-            , "  fn marshal(self) -> *const T { self }"
-            , "}"
-            , ""
-            , "impl<'a, T> MarshalInto<&'a T> for &'a T {"
+            [ "impl<'a, T> MarshalInto<&'a T> for &'a T {"
             , "  fn marshal(self) -> &'a T { self }"
             , "}"
             ]
@@ -376,10 +366,6 @@ foreignPointers = do
             , "    }"
             , "    ForeignPtr(std::ptr::from_mut(Box::leak(p)), free)"
             , "  }"
-            , "}"
-            , ""
-            , "impl<T> MarshalInto<*mut T> for *mut T {"
-            , "  fn marshal(self) -> *mut T { self }"
             , "}"
             , ""
             , "impl<'a, T> MarshalInto<&'a mut T> for &'a mut T {"

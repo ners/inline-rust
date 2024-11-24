@@ -14,18 +14,13 @@ import Foreign.Ptr
 import Test.Hspec
 
 extendContext foreignPointers
+extendContext pointers
 extendContext prelude
 extendContext basic
 setCrateModule
 
 foreignPtrTypes :: Spec
 foreignPtrTypes = describe "ForeignPtr types" $ do
-    it "Can marshal ForeignPtr arguments" $ do
-        p <- mallocForeignPtr
-        withForeignPtr p (`poke` 42)
-        let read = [rust| u64 { unsafe { *$(p: *const u64) } } |]
-        42 `shouldBe` read
-
     it "Can marshal ForeignPtr arguments as references" $ do
         p <- mallocForeignPtr
         withForeignPtr p (`poke` 42)
@@ -46,14 +41,6 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
         prev `shouldBe` 42
         withForeignPtr p peek >>= (`shouldBe` 43)
 
-    it "Can mutate ForeignPtr arguments" $ do
-        p <- mallocForeignPtr
-        [rustIO| () {
-            unsafe { *$(p: *mut u64) = 42; }
-        } |]
-        val <- withForeignPtr p peek
-        val `shouldBe` 42
-
     it "Can marshal ForeignPtr returns" $ do
         let p = [rust| ForeignPtr<u64> { Box::new(42).into() }|]
         val <- withForeignPtr p peek
@@ -71,3 +58,16 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
                     Some(Box::new(42).into())
                 } |]
         withForeignPtr (fromJust mp) peek >>= (`shouldBe` 42)
+
+    it "still has working pointers" $
+        alloca $ \p -> do
+            [rustIO| () {
+                unsafe { *$(p: *mut u64) = 42; }
+            } |]
+            peek p >>= (`shouldBe` 42)
+
+            val <-
+                [rustIO| u64 {
+                    unsafe { *$(p: *u64) }
+                } |]
+            val `shouldBe` 42
