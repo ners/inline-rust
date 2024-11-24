@@ -319,6 +319,8 @@ foreignPointers =
   where
     rule (Ptr _ t _) context
         | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
+    rule (Rptr _ _ t _) context
+        | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
     rule (PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _) context
         | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
     rule _ _ = mempty
@@ -334,6 +336,10 @@ foreignPointers =
             [ "impl<T> MarshalInto<*const T> for *const T {"
             , "  fn marshal(self) -> *const T { self }"
             , "}"
+            , ""
+            , "impl<'a, T> MarshalInto<&'a T> for &'a T {"
+            , "  fn marshal(self) -> &'a T { self }"
+            , "}"
             ]
 
     mutPtr =
@@ -344,6 +350,7 @@ foreignPointers =
             , "    ptr"
             , "  }"
             , "}"
+            , ""
             , "impl<T> MarshalInto<ForeignPtr<T>> for ForeignPtr<T> {"
             , "  fn marshal(self) -> Self {"
             , "    self"
@@ -362,6 +369,10 @@ foreignPointers =
             , ""
             , "impl<T> MarshalInto<*mut T> for *mut T {"
             , "  fn marshal(self) -> *mut T { self }"
+            , "}"
+            , ""
+            , "impl<'a, T> MarshalInto<&'a mut T> for &'a mut T {"
+            , "  fn marshal(self) -> &'a mut T { self }"
             , "}"
             ]
 

@@ -24,6 +24,26 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
         let read = [rust| u64 { unsafe { *$(p: *const u64) } } |]
         42 `shouldBe` read
 
+    it "Can marshal ForeignPtr arguments as references" $ do
+        p <- mallocForeignPtr
+        withForeignPtr p (`poke` 42)
+        let read =
+                [rust| u64 { *$(p: &u64) } |]
+        42 `shouldBe` read
+
+    it "Can marshal ForeignPtr arguments as mutable references" $ do
+        p <- mallocForeignPtr
+        withForeignPtr p (`poke` 42)
+        let prev =
+                [rust| u64 {
+                        let p = $(p: &mut u64);
+                        let ret = *p;
+                        *p = 43;
+                        ret
+                    } |]
+        prev `shouldBe` 42
+        withForeignPtr p peek >>= (`shouldBe` 43)
+
     it "Can mutate ForeignPtr arguments" $ do
         p <- mallocForeignPtr
         [rustIO| () {
