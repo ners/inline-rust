@@ -6,6 +6,7 @@ module ForeignPtr where
 
 import Language.Rust.Inline
 
+import Data.Maybe (fromJust)
 import Data.Word (Word64)
 import Foreign (Storable (..))
 import Foreign.ForeignPtr
@@ -13,6 +14,7 @@ import Foreign.Ptr
 import Test.Hspec
 
 extendContext foreignPointers
+extendContext prelude
 extendContext basic
 setCrateModule
 
@@ -36,11 +38,11 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
         withForeignPtr p (`poke` 42)
         let prev =
                 [rust| u64 {
-                        let p = $(p: &mut u64);
-                        let ret = *p;
-                        *p = 43;
-                        ret
-                    } |]
+                    let p = $(p: &mut u64);
+                    let ret = *p;
+                    *p = 43;
+                    ret
+                } |]
         prev `shouldBe` 42
         withForeignPtr p peek >>= (`shouldBe` 43)
 
@@ -56,3 +58,16 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
         let p = [rust| ForeignPtr<u64> { Box::new(42).into() }|]
         val <- withForeignPtr p peek
         val `shouldBe` 42
+
+    it "Can marshal optional ForeignPtr returns" $ do
+        let mp =
+                [rust| Option<ForeignPtr<u64>> {
+                    None
+                } |]
+        mp `shouldBe` Nothing
+
+        let mp =
+                [rust| Option<ForeignPtr<u64>> {
+                    Some(Box::new(42).into())
+                } |]
+        withForeignPtr (fromJust mp) peek >>= (`shouldBe` 42)

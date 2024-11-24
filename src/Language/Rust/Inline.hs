@@ -314,6 +314,7 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
     -- Convert the Haskell return type to a marshallable FFI type
     (returnFfi, haskRet') <- do
         marshalForm <- ghcMarshallable haskRet
+        let fptrRet haskRet' = [t|Ptr (Ptr $(pure haskRet'), FunPtr (Ptr $(pure haskRet') -> IO ())) -> IO ()|]
         ret <- case marshalForm of
             BoxedDirect -> [t|IO $(pure haskRet)|]
             BoxedIndirect -> [t|Ptr $(pure haskRet) -> IO ()|]
@@ -324,8 +325,11 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                      in fail ("Cannot put unlifted type ‘" ++ retTy ++ "’ in IO")
             ByteString -> [t|Ptr (Ptr Word8, Word, FunPtr (Ptr Word8 -> Word -> IO ())) -> IO ()|]
             ForeignPtr
-                | AppT _ haskRet' <- haskRet -> [t|Ptr (Ptr $(pure haskRet'), FunPtr (Ptr $(pure haskRet') -> IO ())) -> IO ()|]
+                | AppT _ haskRet' <- haskRet -> fptrRet haskRet'
                 | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " using the ForeignPtr calling convention")
+            OptionalForeignPtr
+                | AppT _ (AppT _ haskRet') <- haskRet -> fptrRet haskRet'
+                | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " as an optional ForeignPtr")
         pure (marshalForm, pure ret)
 
     -- Convert the Haskell arguments to marshallable FFI types
@@ -357,6 +361,11 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                         ptr <- [t|Ptr $(pure haskArg')|]
                         pure (ForeignPtr, ptr)
                     | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " using the ForeignPtr calling convention")
+                OptionalForeignPtr
+                    | AppT _ (AppT _ haskArg') <- haskArg -> do
+                        ptr <- [t|Ptr $(pure haskArg')|]
+                        pure (OptionalForeignPtr, ptr)
+                    | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " as an optional ForeignPtr")
                 _ -> pure (marshalForm, haskArg)
 
     -- Generate the Haskell FFI import declaration and emit it
@@ -408,6 +417,20 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                             newForeignPtr $(varE finalizer) $(varE ptr)
                         )
                     |]
+            | returnFfi == OptionalForeignPtr = do
+                finalizer <- newName "finalizer"
+                ptr <- newName "ptr"
+                ret <- newName "ret"
+                [e|
+                    alloca
+                        ( \($(varP ret)) -> do
+                            $(appsE (varE qqName : reverse (varE ret : acc)))
+                            ($(varP ptr), $(varP finalizer)) <- peek $(varE ret)
+                            if $(varE ptr) == nullPtr
+                                then pure Nothing
+                                else Just <$> newForeignPtr $(varE finalizer) $(varE ptr)
+                        )
+                    |]
             | returnByValue returnFfi = appsE (varE qqName : reverse acc)
             | otherwise = do
                 ret <- newName "ret"
@@ -442,6 +465,15 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                         ptr <- newName "ptr"
                         [e|
                             withForeignPtr $(varE argName) (\($(varP ptr)) -> $(goArgs (varE ptr : acc) args))
+                            |]
+                    | marshalForm == OptionalForeignPtr -> do
+                        ptr <- newName "ptr"
+                        fptr <- newName "fptr"
+                        [e|
+                            case $(varE argName) of
+                                Nothing -> let $(varP ptr) = nullPtr in $(goArgs (varE ptr : acc) args)
+                                Just $(varP fptr) ->
+                                    withForeignPtr $(varE fptr) (\($(varP ptr)) -> $(goArgs (varE ptr : acc) args))
                             |]
                     | passByValue marshalForm -> goArgs (varE argName : acc) args
                     | otherwise -> do

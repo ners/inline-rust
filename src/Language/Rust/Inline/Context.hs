@@ -5,6 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Language.Rust.Inline.Context where
 
@@ -314,8 +315,9 @@ pointers = do
             ]
 
 foreignPointers :: Q Context
-foreignPointers =
-    pure $ Context ([rule], [], [foreignPtr, constPtr, mutPtr])
+foreignPointers = do
+    foreignPtrT <- [t|ForeignPtr|]
+    pure $ Context ([rule], [rev foreignPtrT], [foreignPtr, constPtr, mutPtr])
   where
     rule (Ptr _ t _) context
         | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
@@ -323,7 +325,16 @@ foreignPointers =
         | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
     rule (PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _) context
         | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
+    rule (PathTy Nothing (Path False [PathSegment "Option" (Just (AngleBracketed [] [PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _] [] _)) _] _) _) context
+        | First (Just (t', Nothing)) <- lookupRTypeInContext t context =
+            pure ([t|Maybe (ForeignPtr $t')|], pure . pure $ PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] ())) ()] ()) ())
     rule _ _ = mempty
+
+    rev foreignPtrT (AppT foreignPtr t) context
+        | foreignPtr == foreignPtrT = do
+            t' <- lookupHTypeInContext t context
+            pure (Ptr Mutable <$> t' <*> pure ())
+    rev _ _ _ = mempty
 
     foreignPtr =
         unlines
@@ -359,7 +370,7 @@ foreignPointers =
             , ""
             , "impl<T> From<Box<T>> for ForeignPtr<T> {"
             , "  fn from(p: Box<T>) -> ForeignPtr<T> {"
-            , "    extern fn free<T> (ptr: *mut T) {"
+            , "    extern fn free<T>(ptr: *mut T) {"
             , "      let t = unsafe { Box::from_raw(ptr) };"
             , "      drop(t);"
             , "    }"
@@ -373,6 +384,15 @@ foreignPointers =
             , ""
             , "impl<'a, T> MarshalInto<&'a mut T> for &'a mut T {"
             , "  fn marshal(self) -> &'a mut T { self }"
+            , "}"
+            , ""
+            , "impl<T> MarshalInto<ForeignPtr<T>> for Option<ForeignPtr<T>> {"
+            , "  fn marshal(self) -> ForeignPtr<T> {"
+            , "    extern fn panic<T>(_ptr: *mut T) {"
+            , "      panic!(\"Attempted to free a null ForeignPtr\")"
+            , "    }"
+            , "    self.unwrap_or(ForeignPtr(std::ptr::null_mut(), panic))"
+            , "  }"
             , "}"
             ]
 

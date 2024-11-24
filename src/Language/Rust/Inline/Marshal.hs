@@ -38,6 +38,7 @@ data MarshalForm
   | BoxedIndirect      -- ^ value isn't marshallable directly but may be passed indirectly via a 'Ptr'
   | ByteString
   | ForeignPtr
+  | OptionalForeignPtr
   deriving (Eq)
 
 passByValue :: MarshalForm -> Bool
@@ -61,6 +62,7 @@ ghcMarshallable ty = do
    tyconsB <- sequence qTyconsBoxed
    bytestring <- [t| ByteString |]
    fptrCons <- [t| ForeignPtr |]
+   maybeCons <- [t| Maybe |]
 
    case ty of
      _          | ty  `elem` simpleU -> pure UnboxedDirect
@@ -69,6 +71,8 @@ ghcMarshallable ty = do
      AppT con _ | con `elem` tyconsU -> pure UnboxedDirect
                 | con `elem` tyconsB -> pure BoxedDirect
                 | con == fptrCons    -> pure ForeignPtr
+     AppT mb (AppT fptr _)
+                | mb == maybeCons && fptr == fptrCons -> pure OptionalForeignPtr
      _                               -> pure BoxedIndirect
   where
   qSimpleUnboxed = [ [t| Char#   |]
