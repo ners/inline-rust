@@ -5,19 +5,9 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-{- |
-Module      : Language.Rust.Inline.Context
-Description : Defines contexts (rules mapping Rust types to Haskell types)
-Copyright   : (c) Alec Theriault, 2017
-License     : BSD-style
-Maintainer  : ners <ners@gmx.ch>
-Stability   : experimental
-Portability : GHC
--}
 module Language.Rust.Inline.Context where
 
 import Language.Rust.Inline.Pretty (renderType)
-import Language.Rust.Inline.TH.Storable (mkStorable)
 
 import Language.Rust.Quote (ty)
 import Language.Rust.Syntax (
@@ -41,10 +31,7 @@ import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types -- pretty much every type here is used
 import Foreign.Ptr (FunPtr, Ptr)
-import Foreign.Storable
 
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as ByteString
 import GHC.Exts (
     ByteArray#,
     Char#,
@@ -403,35 +390,3 @@ functions = do
                     , "  fn marshal(self) -> (" ++ f ++ ") { self }"
                     , "}"
                     ]
-
-data RustByteString = RustByteString (Ptr Word8) Word
-mkStorable [t|Storable RustByteString|]
-
-bytestrings :: Q Context
-bytestrings = do
-    bytestringT <- [t|ByteString|]
-    pure $ Context ([rule], [rev bytestringT], [rustByteString, impl])
-  where
-    rule rty _
-        | rty == void [ty| &[u8] |] = pure ([t|ByteString|], pure . pure $ void [ty| RustByteString |])
-    rule _ _ = mempty
-
-    rev bytestringT hty _
-        | hty == bytestringT = pure . pure . void $ [ty| &[u8] |]
-    rev _ _ _ = mempty
-
-    rustByteString =
-        unlines
-            [ "#[repr(C)]"
-            , "pub struct RustByteString(*const u8, usize);"
-            ]
-
-    impl =
-        unlines
-            [ "impl<'a> MarshalInto<&'a [u8]> for RustByteString {"
-            , "  fn marshal(self) -> &'a [u8] {"
-            , "    let RustByteString(ptr, len) = self;"
-            , "    unsafe { std::slice::from_raw_parts(ptr, len) }"
-            , "  }"
-            , "}"
-            ]

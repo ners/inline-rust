@@ -39,8 +39,8 @@ data MarshalForm
   | ByteString
   deriving (Eq)
 
-passByValue :: MarshalForm -> Bool
-passByValue = (`elem` [UnboxedDirect, BoxedDirect])
+byValue :: MarshalForm -> Bool
+byValue = (`elem` [UnboxedDirect, BoxedDirect])
 
 -- | Identify which types can be marshalled by the GHC FFI and which types are
 -- unlifted. A negative response to the first of these questions doesn't mean
