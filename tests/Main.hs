@@ -19,11 +19,13 @@ import AlgebraicDataTypes
 import ByteStrings
 import Submodule
 import Submodule.Submodule
+import ForeignPtr
 import Data.Word
 import Test.Hspec
 import Foreign.Storable
 import Foreign.Ptr
 import Foreign.Marshal.Array
+
 extendContext basic
 setCrateRoot []
 
@@ -39,3 +41,4 @@ main = hspec $
     submoduleTest
     subsubmoduleTest
     bytestringSpec
+    foreignPtrTypes

@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -15,7 +16,10 @@ import Language.Rust.Syntax (
     Arg (..),
     FnDecl (..),
     Mutability (..),
-    Ty (BareFn, Ptr),
+    Path (..),
+    PathParameters (..),
+    PathSegment (..),
+    Ty (..),
     Unsafety (..),
  )
 
@@ -32,6 +36,7 @@ import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types -- pretty much every type here is used
 import Foreign.Ptr (FunPtr, Ptr)
 
+import Foreign.ForeignPtr (ForeignPtr)
 import GHC.Exts (
     ByteArray#,
     Char#,
@@ -304,6 +309,58 @@ pointers = do
     mutPtr =
         unlines
             [ "impl<T> MarshalInto<*mut T> for *mut T {"
+            , "  fn marshal(self) -> *mut T { self }"
+            , "}"
+            ]
+
+foreignPointers :: Q Context
+foreignPointers =
+    pure $ Context ([rule], [], [foreignPtr, constPtr, mutPtr])
+  where
+    rule (Ptr _ t _) context
+        | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
+    rule (PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _) context
+        | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
+    rule _ _ = mempty
+
+    foreignPtr =
+        unlines
+            [ "#[repr(C)]"
+            , "pub struct ForeignPtr<T>(*mut T, extern \"C\" fn (*mut T));"
+            ]
+
+    constPtr =
+        unlines
+            [ "impl<T> MarshalInto<*const T> for *const T {"
+            , "  fn marshal(self) -> *const T { self }"
+            , "}"
+            ]
+
+    mutPtr =
+        unlines
+            [ "impl<T> MarshalInto<*mut T> for ForeignPtr<T> {"
+            , "  fn marshal(self) -> *mut T {"
+            , "    let ForeignPtr(ptr, _) = self;"
+            , "    ptr"
+            , "  }"
+            , "}"
+            , "impl<T> MarshalInto<ForeignPtr<T>> for ForeignPtr<T> {"
+            , "  fn marshal(self) -> Self {"
+            , "    self"
+            , "  }"
+            , "}"
+            , ""
+            , "impl<T> From<Box<T>> for ForeignPtr<T> {"
+            , "  fn from(p: Box<T>) -> ForeignPtr<T> {"
+            , "    extern fn free<T> (ptr: *mut T) {"
+            , "      let t = unsafe { Box::from_raw(ptr) };"
+            , "      drop(t);"
+            , "    }"
+            , "    ForeignPtr(std::ptr::from_mut(Box::leak(p)), free)"
+            , "  }"
+            , "}"
+            , ""
+            , "impl<T> MarshalInto<*mut T> for *mut T {"
             , "  fn marshal(self) -> *mut T { self }"
             , "}"
             ]

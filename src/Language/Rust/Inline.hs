@@ -60,6 +60,7 @@ module Language.Rust.Inline (
     pointers,
     prelude,
     bytestrings,
+    foreignPointers,
 
     -- ** Marshalling
     with,
@@ -322,6 +323,9 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                     let retTy = showTy haskRet
                      in fail ("Cannot put unlifted type ‘" ++ retTy ++ "’ in IO")
             ByteString -> [t|Ptr (Ptr Word8, Word, FunPtr (Ptr Word8 -> Word -> IO ())) -> IO ()|]
+            ForeignPtr
+                | AppT _ haskRet' <- haskRet -> [t|Ptr (Ptr $(pure haskRet'), FunPtr (Ptr $(pure haskRet') -> IO ())) -> IO ()|]
+                | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " using the ForeignPtr calling convention")
         pure (marshalForm, pure ret)
 
     -- Convert the Haskell arguments to marshallable FFI types
@@ -348,6 +352,11 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                 ByteString -> do
                     rbsT <- [t|Ptr (Ptr Word8, Word)|]
                     pure (ByteString, rbsT)
+                ForeignPtr
+                    | AppT _ haskArg' <- haskArg -> do
+                        ptr <- [t|Ptr $(pure haskArg')|]
+                        pure (ForeignPtr, ptr)
+                    | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " using the ForeignPtr calling convention")
                 _ -> pure (marshalForm, haskArg)
 
     -- Generate the Haskell FFI import declaration and emit it
@@ -378,17 +387,28 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                 finalizer <- newName "finalizer"
                 [e|
                     alloca
-                        ( \($(varP ret)) ->
-                            do
-                                $(appsE (varE qqName : reverse (varE ret : acc)))
-                                ($(varP ptr), $(varP len), $(varP finalizer)) <- peek $(varE ret)
-                                ByteString.unsafePackCStringFinalizer
-                                    $(varE ptr)
-                                    (fromIntegral $(varE len))
-                                    ($(varE bsFree) $(varE finalizer) $(varE ptr) $(varE len))
+                        ( \($(varP ret)) -> do
+                            $(appsE (varE qqName : reverse (varE ret : acc)))
+                            ($(varP ptr), $(varP len), $(varP finalizer)) <- peek $(varE ret)
+                            ByteString.unsafePackCStringFinalizer
+                                $(varE ptr)
+                                (fromIntegral $(varE len))
+                                ($(varE bsFree) $(varE finalizer) $(varE ptr) $(varE len))
                         )
                     |]
-            | byValue returnFfi = appsE (varE qqName : reverse acc)
+            | returnFfi == ForeignPtr = do
+                finalizer <- newName "finalizer"
+                ptr <- newName "ptr"
+                ret <- newName "ret"
+                [e|
+                    alloca
+                        ( \($(varP ret)) -> do
+                            $(appsE (varE qqName : reverse (varE ret : acc)))
+                            ($(varP ptr), $(varP finalizer)) <- peek $(varE ret)
+                            newForeignPtr $(varE finalizer) $(varE ptr)
+                        )
+                    |]
+            | returnByValue returnFfi = appsE (varE qqName : reverse acc)
             | otherwise = do
                 ret <- newName "ret"
                 [e|
@@ -418,7 +438,12 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                                     with ($(varE ptr), $(varE len)) (\($(varP bsp)) -> $(goArgs (varE bsp : acc) args))
                                 )
                             |]
-                    | byValue marshalForm -> goArgs (varE argName : acc) args
+                    | marshalForm == ForeignPtr -> do
+                        ptr <- newName "ptr"
+                        [e|
+                            withForeignPtr $(varE argName) (\($(varP ptr)) -> $(goArgs (varE ptr : acc) args))
+                            |]
+                    | passByValue marshalForm -> goArgs (varE argName : acc) args
                     | otherwise -> do
                         x <- newName "x"
                         [e|
@@ -444,7 +469,7 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
         mergeArgs t (Just tInter) = (fmap (const mempty) tInter, t)
 
     -- Generate the Rust function.
-    let retByVal = byValue returnFfi
+    let retByVal = returnByValue returnFfi
         (retArg, retTy, ret)
             | retByVal =
                 ( []
@@ -464,7 +489,7 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                 ", "
                 ( [ s ++ ": " ++ marshal (renderType t)
                   | (s, t, v) <- zip3 rustArgNames rustArgs' marshalForms
-                  , let marshal x = if byValue v then x else "*const " ++ x
+                  , let marshal x = if passByValue v then x else "*const " ++ x
                   ]
                     ++ retArg
                 )
@@ -472,7 +497,7 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
         , unlines
             [ "  let " ++ s ++ ": " ++ renderType t ++ " = " ++ marshal s ++ ".marshal();"
             | (s, t, v) <- zip3 rustArgNames rustConvertedArgs marshalForms
-            , let marshal x = if byValue v then x else "unsafe { ::std::ptr::read(" ++ x ++ ") }"
+            , let marshal x = if passByValue v then x else "unsafe { ::std::ptr::read(" ++ x ++ ") }"
             ]
         , "  let out: " ++ renderType rustConvertedRet ++ " = (|| {" ++ renderTokens rustBody ++ "})();"
         , "  " ++ ret

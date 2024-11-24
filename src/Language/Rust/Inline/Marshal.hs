@@ -22,7 +22,7 @@ import Data.Word
 import Data.Int
 
 import Foreign.Ptr                 ( plusPtr )
-import Foreign.ForeignPtr          ( withForeignPtr )
+import Foreign.ForeignPtr          ( withForeignPtr, ForeignPtr )
 import Foreign.StablePtr           ( StablePtr )
 import Foreign.Storable            ( Storable )
 
@@ -37,10 +37,14 @@ data MarshalForm
   | BoxedDirect        -- ^ value is marshallable and can be passed directly to the FFI
   | BoxedIndirect      -- ^ value isn't marshallable directly but may be passed indirectly via a 'Ptr'
   | ByteString
+  | ForeignPtr
   deriving (Eq)
 
-byValue :: MarshalForm -> Bool
-byValue = (`elem` [UnboxedDirect, BoxedDirect])
+passByValue :: MarshalForm -> Bool
+passByValue = (`elem` [UnboxedDirect, BoxedDirect, ForeignPtr])
+
+returnByValue :: MarshalForm -> Bool
+returnByValue = (`elem` [UnboxedDirect, BoxedDirect])
 
 -- | Identify which types can be marshalled by the GHC FFI and which types are
 -- unlifted. A negative response to the first of these questions doesn't mean
@@ -56,6 +60,7 @@ ghcMarshallable ty = do
    tyconsU <- sequence qTyconsUnboxed
    tyconsB <- sequence qTyconsBoxed
    bytestring <- [t| ByteString |]
+   fptrCons <- [t| ForeignPtr |]
 
    case ty of
      _          | ty  `elem` simpleU -> pure UnboxedDirect
@@ -63,6 +68,7 @@ ghcMarshallable ty = do
                 | ty == bytestring   -> pure ByteString
      AppT con _ | con `elem` tyconsU -> pure UnboxedDirect
                 | con `elem` tyconsB -> pure BoxedDirect
+                | con == fptrCons    -> pure ForeignPtr
      _                               -> pure BoxedIndirect
   where
   qSimpleUnboxed = [ [t| Char#   |]
