@@ -29,6 +29,8 @@ import Data.Functor (void)
 import Data.Word (Word8)
 import Foreign.Ptr (Ptr)
 
+import Debug.Trace (traceM)
+
 bytestrings :: Q Context
 bytestrings =
     pure $ Context ([rule], [], [rustByteString, impl])
@@ -36,6 +38,7 @@ bytestrings =
     rule rty _
         | rty == void [ty| &[u8] |] = pure ([t|ByteString|], pure . pure $ void [ty| RustByteString |])
         | rty == void [ty| Vec<u8> |] = pure ([t|ByteString|], pure . pure $ void [ty| RustOwnedByteString |])
+        | rty == void [ty| Option<Vec<u8>> |] = pure ([t|Maybe ByteString|], pure . pure $ void [ty| RustOwnedByteString |])
     rule _ _ = mempty
 
     rustByteString =
@@ -68,6 +71,15 @@ bytestrings =
             , "      drop(bytes);"
             , "    }"
             , "    RustOwnedByteString(bytes.as_mut_ptr(), len, free)"
+            , "  }"
+            , "}"
+            , ""
+            , "impl MarshalInto<RustOwnedByteString> for Option<Vec<u8>> {"
+            , "  fn marshal(self) -> RustOwnedByteString {"
+            , "    extern fn panic(ptr: *mut u8, len: usize) {"
+            , "      panic!(\"Attempted to free a null ByteString\");"
+            , "    }"
+            , "    self.map(|bs| bs.marshal()).unwrap_or(RustOwnedByteString(std::ptr::null_mut(), 0, panic))"
             , "  }"
             , "}"
             ]

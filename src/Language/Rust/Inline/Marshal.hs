@@ -39,7 +39,8 @@ data MarshalForm
   | ByteString
   | ForeignPtr
   | OptionalForeignPtr
-  deriving (Eq)
+  | OptionalByteString
+  deriving (Eq, Show)
 
 passByValue :: MarshalForm -> Bool
 passByValue = (`elem` [UnboxedDirect, BoxedDirect, ForeignPtr])
@@ -71,9 +72,10 @@ ghcMarshallable ty = do
      AppT con _ | con `elem` tyconsU -> pure UnboxedDirect
                 | con `elem` tyconsB -> pure BoxedDirect
                 | con == fptrCons    -> pure ForeignPtr
-     AppT mb (AppT fptr _)
-                | mb == maybeCons && fptr == fptrCons -> pure OptionalForeignPtr
-     _                               -> pure BoxedIndirect
+     AppT mb (AppT c _)
+                | mb == maybeCons && c == fptrCons -> pure OptionalForeignPtr
+     AppT mb c | mb == maybeCons && c == bytestring -> pure OptionalByteString
+     _ -> pure BoxedIndirect
   where
   qSimpleUnboxed = [ [t| Char#   |]
                    , [t| Int#    |]

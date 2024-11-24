@@ -9,6 +9,7 @@ import Test.Hspec
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Unsafe as ByteString
+import Data.Maybe (fromJust)
 import Data.String
 
 extendContext basic
@@ -34,3 +35,10 @@ bytestringSpec = describe "ByteStrings" $ do
         ByteString.pack [0, 1, 2, 3]
             `shouldBe` rustBs
         ByteString.unsafeFinalize rustBs
+
+    it "can marshal optional ByteString return values" $ do
+        let noRustBs = [rust| Option<Vec<u8>> { None } |]
+        noRustBs `shouldBe` Nothing
+
+        let rustBs = [rust| Option<Vec<u8>> { Some(vec![0, 1, 2, 3]) } |]
+        fromJust rustBs `shouldBe` ByteString.pack [0, 1, 2, 3]
