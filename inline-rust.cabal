@@ -28,15 +28,16 @@ library
   exposed-modules:     Language.Rust.Inline
                        Language.Rust.Inline.TH
   other-modules:       Language.Rust.Inline.Context
-                       Language.Rust.Inline.Context.Prelude
                        Language.Rust.Inline.Context.ByteString
+                       Language.Rust.Inline.Context.Marshalable
+                       Language.Rust.Inline.Context.Prelude
+                       Language.Rust.Inline.Internal
                        Language.Rust.Inline.Marshal
                        Language.Rust.Inline.Parser
                        Language.Rust.Inline.Pretty
-                       Language.Rust.Inline.Internal
+                       Language.Rust.Inline.TH.ReprC
                        Language.Rust.Inline.TH.Storable
                        Language.Rust.Inline.TH.Utilities
-                       Language.Rust.Inline.TH.ReprC
 
   other-extensions:    DeriveDataTypeable
                      , CPP
@@ -62,7 +63,7 @@ library
 
 test-suite spec
   hs-source-dirs:      tests
-  ghc-options:         -threaded
+  ghc-options:         -threaded -ddump-splices -ddump-to-file
 
   if os(windows)
     extra-libraries:

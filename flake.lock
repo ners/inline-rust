@@ -3,11 +3,11 @@
     "language-rust": {
       "flake": false,
       "locked": {
-        "lastModified": 1729283594,
-        "narHash": "sha256-nVexe9Jrj0DtpjyPX+S2t/Op2iJyU1IRncW/BO8Ties=",
+        "lastModified": 1736519943,
+        "narHash": "sha256-5b4PRIpNCaZiTL3M1DZsKtSJWz5PPmyMpHatB7zBe+M=",
         "owner": "GaloisInc",
         "repo": "language-rust",
-        "rev": "ae59c7355b2fbbe818c1fdd23894df6bfa0432e5",
+        "rev": "f23c2b055217479bd3d1525dc9455d0f8bfcc394",
         "type": "github"
       },
       "original": {
@@ -18,11 +18,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1731319897,
-        "narHash": "sha256-PbABj4tnbWFMfBp6OcUK5iGy1QY+/Z96ZcLpooIbuEI=",
+        "lastModified": 1739446958,
+        "narHash": "sha256-+/bYK3DbPxMIvSL4zArkMX0LQvS7rzBKXnDXLfKyRVc=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "dc460ec76cbff0e66e269457d7b728432263166c",
+        "rev": "2ff53fe64443980e139eaa286017f53f88336dd0",
         "type": "github"
       },
       "original": {

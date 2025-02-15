@@ -11,6 +11,7 @@ import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Unsafe as ByteString
 import Data.Maybe (fromJust)
 import Data.String
+import Data.Either (fromRight)
 
 extendContext basic
 extendContext bytestrings
@@ -41,4 +42,11 @@ bytestringSpec = describe "ByteStrings" $ do
         noRustBs `shouldBe` Nothing
 
         let rustBs = [rust| Option<Vec<u8>> { Some(vec![0, 1, 2, 3]) } |]
-        fromJust rustBs `shouldBe` ByteString.pack [0, 1, 2, 3]
+        rustBs `shouldBe` Just (ByteString.pack [0, 1, 2, 3])
+
+    -- it "can marshal result ByteString return values" $ do
+    --     let errRustBs = [rust| Result<Vec<u8>, ()> { Err(()) } |]
+    --     errRustBs `shouldBe` Left ()
+
+    --     let okRustBs = [rust| Result<Vec<u8>, ()> { Ok(vec![0, 1, 2, 3]) } |]
+    --     okRustBs `shouldBe` Right (ByteString.pack [0, 1, 2, 3])

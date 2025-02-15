@@ -64,7 +64,7 @@ maybeContext = do
   where
   rule (PathTy Nothing (Path False [PathSegment "Option" (Just (AngleBracketed [] [t] [] _)) _] _) _) context = do
     (t', rInterOpt) <- lookupRTypeInContext t context
-    let inter = mkGenPathTy "MaybeC" <$> ((\x -> [x]) <$> maybe (pure t) id rInterOpt)
+    let inter = pure . mkGenPathTy "MaybeC" $ fromMaybe t rInterOpt
     pure ([t| Maybe $t' |], Just inter)
   rule _ _ = mempty
 
