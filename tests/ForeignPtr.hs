@@ -47,18 +47,18 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
         val <- withForeignPtr p peek
         val `shouldBe` 42
 
-    -- it "Can marshal optional ForeignPtr returns" $ do
-    --     let mp =
-    --             [rust| Option<ForeignPtr<u64>> {
-    --                 None
-    --             } |]
-    --     mp `shouldBe` Nothing
+    it "Can marshal optional ForeignPtr returns" $ do
+        let mp =
+                [rust| Option<ForeignPtr<u64>> {
+                    None
+                } |]
+        mp `shouldBe` Nothing
 
-    --     let mp =
-    --             [rust| Option<ForeignPtr<u64>> {
-    --                 Some(Box::new(42).into())
-    --             } |]
-    --     withForeignPtr (fromJust mp) peek >>= (`shouldBe` 42)
+        let mp =
+                [rust| Option<ForeignPtr<u64>> {
+                    Some(Box::new(42).into())
+                } |]
+        withForeignPtr (fromJust mp) peek >>= (`shouldBe` 42)
 
     -- it "Can marshal result ForeignPtr returns" $ do
     --     let mp =

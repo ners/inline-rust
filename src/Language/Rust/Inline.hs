@@ -1,6 +1,7 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
 Module      : Language.Rust.Inline
@@ -311,8 +312,7 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
     -- Convert the Haskell return type to a marshallable FFI type
     (returnFfi, haskRet') <- do
         marshalForm <- ghcMarshallable haskRet
-        ret <- returnType marshalForm haskRet
-        pure (marshalForm, pure ret)
+        pure (marshalForm, returnType marshalForm haskRet)
 
     -- Convert the Haskell arguments to marshallable FFI types
     (marshalForms, haskArgs') <- fmap unzip $
@@ -324,7 +324,8 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
     -- Generate the Haskell FFI import declaration and emit it
     -- bsFree <- newName $ "bsFree" ++ show (abs q)
     -- bsFreeSig <- [t|FunPtr (Ptr Word8 -> Word -> IO ()) -> Ptr Word8 -> Word -> IO ()|]
-    haskSig <- foldr (\l r -> [t|$(pure l) -> $r|]) haskRet' haskArgs'
+    haskRet'' <- if addIOUnit returnFfi then [t|$(haskRet') -> IO ()|] else haskRet'
+    haskSig <- foldr (\l r -> [t|$(pure l) -> $r|]) (pure haskRet'') haskArgs'
     let ffiImport = ForeignD (ImportF CCall safety qqStrName qqName haskSig)
     -- let ffiBsFree = ForeignD (ImportF CCall Safe "dynamic" bsFree bsFreeSig)
     addTopDecls [ffiImport]
@@ -350,7 +351,8 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                         ( \($(varP ret)) ->
                             do
                                 $(appsE (varE qqName : reverse (varE ret : acc)))
-                                Marshalable.peek $(varE ret)
+                                r :: $(pure haskRet) <- Marshalable.peek $(varE ret)
+                                pure r
                         )
                     |]
 

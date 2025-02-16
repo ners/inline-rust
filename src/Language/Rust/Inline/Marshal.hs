@@ -41,6 +41,7 @@ data MarshalForm = MarshalForm
     , returnType :: Type -> Q Type
     , argumentType :: Type -> Q Type
     , runsInIO :: Bool
+    , addIOUnit :: Bool
     }
 
 -- | Identify which types can be marshalled by the GHC FFI and which types are
@@ -67,35 +68,39 @@ ghcMarshallable ty = do
            , returnType = pure
            , argumentType = pure
            , runsInIO = False
+           , addIOUnit = False
            }
        boxedDirect = unboxedDirect{ returnType = \t -> [t|IO $(pure t)|], runsInIO = True }
        boxedIndirect = MarshalForm
            { passByValue = False
            , marshalStep = True
            , returnByValue = False
-           , returnType = \t -> [t|Ptr (PeekType $(pure t)) -> IO ()|]
+           , returnType = \t -> [t|Ptr (PeekType $(pure t))|]
            , argumentType = \t -> [t|Ptr (WithPtrType $(pure t))|]
            , runsInIO = True
+           , addIOUnit = True
            }
        foreignPtr = MarshalForm
            { passByValue = False
            , marshalStep = True
            , returnByValue = False
            , returnType = \case
-                AppT _ r -> [t|Ptr (Ptr $(pure r), FunPtr (Ptr $(pure r) -> IO ())) -> IO ()|]
+                AppT _ r -> [t|Ptr (Ptr $(pure r), FunPtr (Ptr $(pure r) -> IO ()))|]
                 t -> fail $ "Cannot marshal " <> (show . pprParendType) t <> " as a ForeignPtr"
            , argumentType = \case
                 AppT _ r -> [t|Ptr (Ptr $(pure r))|]
                 t -> fail $ "Cannot marshal " <> (show . pprParendType) t <> " as a ForeignPtr"
            , runsInIO = True
+           , addIOUnit = True
            }
        byteString = MarshalForm
            { passByValue = False
            , marshalStep = True
            , returnByValue = False
-           , returnType = const [t|Ptr (Ptr Word8, Word, FunPtr (Ptr Word8 -> Word -> IO ())) -> IO ()|]
+           , returnType = const [t|Ptr (Ptr Word8, Word, FunPtr (Ptr Word8 -> Word -> IO ()))|]
            , argumentType = const [t|Ptr (Ptr Word8, Word)|]
            , runsInIO = True
+           , addIOUnit = True
            }
 
    case ty of

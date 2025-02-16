@@ -323,16 +323,14 @@ foreignPointers = do
         | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
     rule (PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _) context
         | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
-    rule (PathTy Nothing (Path False [PathSegment "Option" (Just (AngleBracketed [] [PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _] [] _)) _] _) _) context
-        | First (Just (t', Nothing)) <- lookupRTypeInContext t context =
-            pure ([t|Maybe (ForeignPtr $t')|], pure . pure $ PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] ())) ()] ()) ())
     rule _ _ = mempty
 
     rev _ _ _ = mempty
 
     foreignPtr =
         unlines
-            [ "#[repr(C)]"
+            [ "#[derive(Copy, Clone)]"
+            , "#[repr(C)]"
             , "pub struct ForeignPtr<T>(pub *mut T, pub extern \"C\" fn (*mut T));"
             ]
 
@@ -370,15 +368,6 @@ foreignPointers = do
             , ""
             , "impl<'a, T> MarshalInto<&'a mut T> for &'a mut T {"
             , "  fn marshal(self) -> &'a mut T { self }"
-            , "}"
-            , ""
-            , "impl<T> MarshalInto<ForeignPtr<T>> for Option<ForeignPtr<T>> {"
-            , "  fn marshal(self) -> ForeignPtr<T> {"
-            , "    extern fn panic<T>(_ptr: *mut T) {"
-            , "      panic!(\"Attempted to free a null ForeignPtr\")"
-            , "    }"
-            , "    self.unwrap_or(ForeignPtr(std::ptr::null_mut(), panic))"
-            , "  }"
             , "}"
             ]
 

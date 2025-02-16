@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module ByteStrings where
 
@@ -14,6 +15,7 @@ import Data.String
 import Data.Either (fromRight)
 
 extendContext basic
+extendContext prelude
 extendContext bytestrings
 setCrateModule
 
