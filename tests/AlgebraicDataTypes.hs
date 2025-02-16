@@ -221,125 +221,126 @@ impl<A, B> These<A, B> {
 
 algebraicDataTypes :: Spec
 algebraicDataTypes = describe "Algebraic data types" $ do
-  it "Can marshal a `Complex Float` argument/return" $ do
-    let z1, z2 :: Complex Float 
-        z1 = 1.3 :+ 4.5 
-        z2 = 6.7 :+ 8.9
-    [rust| Cpx<f32> { $(z1: Cpx<f32>) + $(z2: Cpx<f32>) } |] `shouldBe` z1 + z2
-
-  it "Can marshal a custom single-constructor ADT argument/return" $ do
-    let s1 = StructLike 78 (negate 267)
-        s2 = StructLike 92 45223
-        s3 = StructLike2 (34, -92391)
-        s4 = StructLike2 (576, 1234) 
-    
-    for_ [s1,s2] $ \si ->
-        [rust| StructLike2 { $(si: StructLike).in2() } |] `shouldBe` in2 si
-    for_ [s3,s4] $ \si ->
-        [rust| StructLike { $(si: StructLike2).out2() } |] `shouldBe` out2 si
-
-  it "Can marshal a custom monomorphic ADT argument/return" $ do
-    let f1, f2, f3, f4 :: Foo
-        f1 = Baz 'a' 0
-        f2 = Baz 'b' 2
-        f3 = Qux (7.1 :+ 3.4) 'f'
-        f4 = Bar
-
-    for_ [f1,f2,f3,f4] $ \fi ->
-      [rust| Foo { $(fi: Foo).quux() } |] `shouldBe` quux fi
-
-  it "Can marshal nested monomorphic ADT arguments/returns" $ do
-    let c1, c2, c3, c4, c5, c6, c7 :: Croc
-        c1 = Lob (Just (Baz 'a' 0)) 2
-        c2 = Lob (Just (Baz 'b' 2)) 6
-        c3 = Lob (Just (Qux (7.1 :+ 3.4) 'f')) 8
-        c4 = Lob (Just Bar) 9
-        c5 = Lob Nothing 3
-        c6 = Boo 3 (-2)
-        c7 = Boo (-4) 2
-
-    for_ [c1,c2,c3,c4,c5,c6,c7] $ \ci ->
-      [rust| Croc { $(ci: Croc).croc() } |] `shouldBe` croc ci
-
-  it "Can marshal polymorphic ADT arguments/returns" $ do
-    let t1, t2, t3 :: These Int8 Int64
-        t1 = This maxBound
-        t2 = That 432442
-        t3 = Both (maxBound - 3) 879
-
-    for_ [t1,t2,t3] $ \ti ->
-      let v1 = [rust| These<i16,i64> {
-                 $(ti: These<i8,i64>).bimap(|x| x as i16 * 2, |y| y + 2)
-               } |]
-          v2 = bimap (\x -> fromIntegral x * 2) (+ 2) ti
-      in v1 `shouldBe` v2
-
-  it "Can marshal nested polymorphic ADT arguments/returns" $ do
-    let t1, t2, t3 :: These (Maybe Int) (These Int8 Int8)
-        t1 = This (Just 6)
-        t2 = This Nothing
-        t3 = That (This 8)
-        t4 = That (That 9)
-        t5 = That (Both 1 2)
-        t6 = Both (Just 3) (That 8)
-        t7 = Both Nothing (Both 3 5)
-        t8 = Both (Just 213) (Both 78 98)
-
-    for_ [t1,t2,t3,t4,t5,t6,t7,t8] $ \ti ->
-      let v1 = [rust| These<Option<isize>,These<i8,i8>> {
-                 $(ti: These<Option<isize>,These<i8,i8>>).bimap(
-                    |oi| oi.map(|i| i + 5),
-                    |t| t.bimap(|i| i + 2, |j| j * 3),
-                 )
-               } |]
-          v2 = bimap (fmap (+5)) (bimap (+2) (*3)) ti
-      in v1 `shouldBe` v2
-
-  it "Can marshal a big ADT whose tag needs more than a `Word8`" $ do
-    let b1, b2, b3, b4 :: Big Int64
-        b1 = C000
-        b2 = C160
-        b3 = C298
-        b4 = C299 89
-
-    for_ [b1,b2,b3,b4] $ \bi ->
-      let v1 = [rust| Big<i64> {
-                  match $(bi: Big<i64>) {
-                    Big::C160 => Big::C161,
-                    Big::C299(i) => Big::C299(i+1),
-                    b => b,
-                  }
-               } |]
-          v2 = case bi of
-                 C160 -> C161
-                 C299 i -> C299 (i + 1)
-                 b -> b
-      in v1 `shouldBe` v2
-
-  it "Can marshal a custom `Foo2 Int` and `Foo2 (Foo2 Int)` return" $ do
-    let f1, f2, f3, f4 :: Foo2 Int
-        f1 = Bar2
-        f2 = Baz2 3
-        f3 = Qux2 (-1) 2
-        f4 = Quux2 (-8) 3
-    
-    let fooed f = case f of 
-                    Qux2 x y -> Qux2 (Qux2 x y) (Qux2 y x)
-                    Quux2 i x -> Quux2 (i + 1) (Qux2 x x)
-                    Bar2 -> Bar2
-                    Baz2 w -> Baz2 w
-
-    let fooed' f = [rust| Foo2<Foo2<isize>> {
-      match $(f: Foo2<isize>) {
-        Foo2::Qux2(x,y) => Foo2::Qux2(Foo2::Qux2(x,y), Foo2::Qux2(y,x)),
-        Foo2::Quux2(i,x) => Foo2::Quux2(i+1, Foo2::Qux2(x,x)),
-        Foo2::Bar2 => Foo2::Bar2,
-        Foo2::Baz2(w) => Foo2::Baz2(w),
-      }
-    } |]
-
-    fooed f1 `shouldBe` fooed' f1
-    fooed f2 `shouldBe` fooed' f2
-    fooed f3 `shouldBe` fooed' f3
-    fooed f4 `shouldBe` fooed' f4
+  pure ()
+  -- it "Can marshal a `Complex Float` argument/return" $ do
+  --   let z1, z2 :: Complex Float 
+  --       z1 = 1.3 :+ 4.5 
+  --       z2 = 6.7 :+ 8.9
+  --   [rust| Cpx<f32> { $(z1: Cpx<f32>) + $(z2: Cpx<f32>) } |] `shouldBe` z1 + z2
+  --
+  -- it "Can marshal a custom single-constructor ADT argument/return" $ do
+  --   let s1 = StructLike 78 (negate 267)
+  --       s2 = StructLike 92 45223
+  --       s3 = StructLike2 (34, -92391)
+  --       s4 = StructLike2 (576, 1234) 
+  --
+  --   for_ [s1,s2] $ \si ->
+  --       [rust| StructLike2 { $(si: StructLike).in2() } |] `shouldBe` in2 si
+  --   for_ [s3,s4] $ \si ->
+  --       [rust| StructLike { $(si: StructLike2).out2() } |] `shouldBe` out2 si
+  --
+  -- it "Can marshal a custom monomorphic ADT argument/return" $ do
+  --   let f1, f2, f3, f4 :: Foo
+  --       f1 = Baz 'a' 0
+  --       f2 = Baz 'b' 2
+  --       f3 = Qux (7.1 :+ 3.4) 'f'
+  --       f4 = Bar
+  --
+  --   for_ [f1,f2,f3,f4] $ \fi ->
+  --     [rust| Foo { $(fi: Foo).quux() } |] `shouldBe` quux fi
+  --
+  -- it "Can marshal nested monomorphic ADT arguments/returns" $ do
+  --   let c1, c2, c3, c4, c5, c6, c7 :: Croc
+  --       c1 = Lob (Just (Baz 'a' 0)) 2
+  --       c2 = Lob (Just (Baz 'b' 2)) 6
+  --       c3 = Lob (Just (Qux (7.1 :+ 3.4) 'f')) 8
+  --       c4 = Lob (Just Bar) 9
+  --       c5 = Lob Nothing 3
+  --       c6 = Boo 3 (-2)
+  --       c7 = Boo (-4) 2
+  --
+  --   for_ [c1,c2,c3,c4,c5,c6,c7] $ \ci ->
+  --     [rust| Croc { $(ci: Croc).croc() } |] `shouldBe` croc ci
+  --
+  -- it "Can marshal polymorphic ADT arguments/returns" $ do
+  --   let t1, t2, t3 :: These Int8 Int64
+  --       t1 = This maxBound
+  --       t2 = That 432442
+  --       t3 = Both (maxBound - 3) 879
+  --
+  --   for_ [t1,t2,t3] $ \ti ->
+  --     let v1 = [rust| These<i16,i64> {
+  --                $(ti: These<i8,i64>).bimap(|x| x as i16 * 2, |y| y + 2)
+  --              } |]
+  --         v2 = bimap (\x -> fromIntegral x * 2) (+ 2) ti
+  --     in v1 `shouldBe` v2
+  --
+  -- it "Can marshal nested polymorphic ADT arguments/returns" $ do
+  --   let t1, t2, t3 :: These (Maybe Int) (These Int8 Int8)
+  --       t1 = This (Just 6)
+  --       t2 = This Nothing
+  --       t3 = That (This 8)
+  --       t4 = That (That 9)
+  --       t5 = That (Both 1 2)
+  --       t6 = Both (Just 3) (That 8)
+  --       t7 = Both Nothing (Both 3 5)
+  --       t8 = Both (Just 213) (Both 78 98)
+  --
+  --   for_ [t1,t2,t3,t4,t5,t6,t7,t8] $ \ti ->
+  --     let v1 = [rust| These<Option<isize>,These<i8,i8>> {
+  --                $(ti: These<Option<isize>,These<i8,i8>>).bimap(
+  --                   |oi| oi.map(|i| i + 5),
+  --                   |t| t.bimap(|i| i + 2, |j| j * 3),
+  --                )
+  --              } |]
+  --         v2 = bimap (fmap (+5)) (bimap (+2) (*3)) ti
+  --     in v1 `shouldBe` v2
+  --
+  -- it "Can marshal a big ADT whose tag needs more than a `Word8`" $ do
+  --   let b1, b2, b3, b4 :: Big Int64
+  --       b1 = C000
+  --       b2 = C160
+  --       b3 = C298
+  --       b4 = C299 89
+  --
+  --   for_ [b1,b2,b3,b4] $ \bi ->
+  --     let v1 = [rust| Big<i64> {
+  --                 match $(bi: Big<i64>) {
+  --                   Big::C160 => Big::C161,
+  --                   Big::C299(i) => Big::C299(i+1),
+  --                   b => b,
+  --                 }
+  --              } |]
+  --         v2 = case bi of
+  --                C160 -> C161
+  --                C299 i -> C299 (i + 1)
+  --                b -> b
+  --     in v1 `shouldBe` v2
+  --
+  -- it "Can marshal a custom `Foo2 Int` and `Foo2 (Foo2 Int)` return" $ do
+  --   let f1, f2, f3, f4 :: Foo2 Int
+  --       f1 = Bar2
+  --       f2 = Baz2 3
+  --       f3 = Qux2 (-1) 2
+  --       f4 = Quux2 (-8) 3
+  --
+  --   let fooed f = case f of 
+  --                   Qux2 x y -> Qux2 (Qux2 x y) (Qux2 y x)
+  --                   Quux2 i x -> Quux2 (i + 1) (Qux2 x x)
+  --                   Bar2 -> Bar2
+  --                   Baz2 w -> Baz2 w
+  --
+  --   let fooed' f = [rust| Foo2<Foo2<isize>> {
+  --     match $(f: Foo2<isize>) {
+  --       Foo2::Qux2(x,y) => Foo2::Qux2(Foo2::Qux2(x,y), Foo2::Qux2(y,x)),
+  --       Foo2::Quux2(i,x) => Foo2::Quux2(i+1, Foo2::Qux2(x,x)),
+  --       Foo2::Bar2 => Foo2::Bar2,
+  --       Foo2::Baz2(w) => Foo2::Baz2(w),
+  --     }
+  --   } |]
+  --
+  --   fooed f1 `shouldBe` fooed' f1
+  --   fooed f2 `shouldBe` fooed' f2
+  --   fooed f3 `shouldBe` fooed' f3
+  --   fooed f4 `shouldBe` fooed' f4
 

@@ -79,6 +79,8 @@ module Language.Rust.Inline (
     mkStorable,
     mkReprC,
 
+    Marshalable.PeekType,
+
     -- * Top-level Rust items
 ) where
 
@@ -94,7 +96,6 @@ import Language.Rust.Inline.Pretty
 import Language.Rust.Inline.TH.ReprC (mkReprC)
 import Language.Rust.Inline.TH.Storable (mkStorable)
 
-import Language.Haskell.TH (pprParendType)
 import Language.Haskell.TH.Lib
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
 import Language.Haskell.TH.Syntax
@@ -103,7 +104,7 @@ import Foreign.Marshal.Alloc (alloca, free)
 import Foreign.Marshal.Array (newArray, withArrayLen)
 import Foreign.Marshal.Unsafe (unsafeLocalState)
 import Foreign.Marshal.Utils (new, with)
-import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr, nullPtr)
+import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 
 import Control.Monad (void)
 import Data.List (intercalate)
@@ -111,8 +112,6 @@ import Data.Traversable (for)
 import Data.Word (Word8)
 import System.Random (randomIO)
 
-import qualified Data.ByteString.Unsafe as ByteString
-import Foreign.Storable (Storable (..))
 import qualified Language.Rust.Inline.Context.Marshalable as Marshalable
 
 {- $overview
@@ -280,9 +279,6 @@ rustQuasiQuoter safety isPure supportDecs =
         | supportDecs = emitCodeBlock
         | otherwise = err
 
-showTy :: Type -> String
-showTy = show . pprParendType
-
 {- | This function sums up the packages. What it does:
 
    1. Map the Rust type annotations in the quasiquote to their Haskell types.
@@ -326,12 +322,12 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
             pure (marshalForm, ret)
 
     -- Generate the Haskell FFI import declaration and emit it
-    bsFree <- newName $ "bsFree" ++ show (abs q)
-    bsFreeSig <- [t|FunPtr (Ptr Word8 -> Word -> IO ()) -> Ptr Word8 -> Word -> IO ()|]
+    -- bsFree <- newName $ "bsFree" ++ show (abs q)
+    -- bsFreeSig <- [t|FunPtr (Ptr Word8 -> Word -> IO ()) -> Ptr Word8 -> Word -> IO ()|]
     haskSig <- foldr (\l r -> [t|$(pure l) -> $r|]) haskRet' haskArgs'
     let ffiImport = ForeignD (ImportF CCall safety qqStrName qqName haskSig)
-    let ffiBsFree = ForeignD (ImportF CCall Safe "dynamic" bsFree bsFreeSig)
-    addTopDecls [ffiImport, ffiBsFree]
+    -- let ffiBsFree = ForeignD (ImportF CCall Safe "dynamic" bsFree bsFreeSig)
+    addTopDecls [ffiImport]
 
     -- Generate the Haskell FFI call
     let goArgs ::

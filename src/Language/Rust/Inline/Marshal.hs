@@ -15,6 +15,7 @@ Portability : GHC
 module Language.Rust.Inline.Marshal where
 
 import Language.Rust.Inline.Context
+import Language.Rust.Inline.Context.Marshalable (PeekType, WithPtrType)
 
 import Language.Haskell.TH 
 import Language.Haskell.TH.Syntax  ( addTopDecls ) 
@@ -72,19 +73,19 @@ ghcMarshallable ty = do
            { passByValue = False
            , marshalStep = True
            , returnByValue = False
-           , returnType = \t -> [t|Ptr $(pure t) -> IO ()|]
-           , argumentType = \t -> [t|Ptr $(pure t)|]
+           , returnType = \t -> [t|Ptr (PeekType $(pure t)) -> IO ()|]
+           , argumentType = \t -> [t|Ptr (WithPtrType $(pure t))|]
            , runsInIO = True
            }
        foreignPtr = MarshalForm
-           { passByValue = True
+           { passByValue = False
            , marshalStep = True
            , returnByValue = False
            , returnType = \case
                 AppT _ r -> [t|Ptr (Ptr $(pure r), FunPtr (Ptr $(pure r) -> IO ())) -> IO ()|]
                 t -> fail $ "Cannot marshal " <> (show . pprParendType) t <> " as a ForeignPtr"
            , argumentType = \case
-                AppT _ r -> [t|Ptr $(pure r)|]
+                AppT _ r -> [t|Ptr (Ptr $(pure r))|]
                 t -> fail $ "Cannot marshal " <> (show . pprParendType) t <> " as a ForeignPtr"
            , runsInIO = True
            }
