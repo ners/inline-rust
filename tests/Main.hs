@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, CPP #-}
+{-# LANGUAGE CPP #-}
 
 #ifdef darwin_HOST_OS
 {-# OPTIONS_GHC -optl-Wl,-all_load #-}
@@ -10,21 +10,21 @@ module Main where
 
 import Language.Rust.Inline
 
-import SimpleTypes
-import GhcUnboxedTypes
-import PointerTypes
-import FunctionPointerTypes
-import PreludeTypes
 import AlgebraicDataTypes
 import ByteStrings
+import Data.Word
+import Foreign.Marshal.Array
+import Foreign.Ptr
+import Foreign.Storable
+import ForeignPtr
+import FunctionPointerTypes
+import GhcUnboxedTypes
+import PointerTypes
+import PreludeTypes
+import SimpleTypes
 import Submodule
 import Submodule.Submodule
-import ForeignPtr
-import Data.Word
 import Test.Hspec
-import Foreign.Storable
-import Foreign.Ptr
-import Foreign.Marshal.Array
 
 extendContext basic
 setCrateRoot []
@@ -32,13 +32,13 @@ setCrateRoot []
 main :: IO ()
 main = hspec $
   describe "Rust quasiquoter" $ do
-    simpleTypes
-    ghcUnboxedTypes
-    pointerTypes
-    funcPointerTypes
-    preludeTypes
     algebraicDataTypes
-    submoduleTest
-    subsubmoduleTest
     bytestringSpec
     foreignPtrTypes
+    funcPointerTypes
+    ghcUnboxedTypes
+    pointerTypes
+    preludeTypes
+    simpleTypes
+    submoduleTest
+    subsubmoduleTest

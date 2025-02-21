@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 module PreludeTypes where
 
 import Language.Rust.Inline

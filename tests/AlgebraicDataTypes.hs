@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell, ExplicitForAll, ScopedTypeVariables #-}
 module AlgebraicDataTypes where
 
 import Language.Rust.Inline

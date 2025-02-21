@@ -105,12 +105,11 @@ import Foreign.Marshal.Alloc (alloca, free)
 import Foreign.Marshal.Array (newArray, withArrayLen)
 import Foreign.Marshal.Unsafe (unsafeLocalState)
 import Foreign.Marshal.Utils (new, with)
-import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
+import Foreign.Ptr (freeHaskellFunPtr)
 
 import Control.Monad (void)
 import Data.List (intercalate)
 import Data.Traversable (for)
-import Data.Word (Word8)
 import System.Random (randomIO)
 
 import qualified Language.Rust.Inline.Context.Marshalable as Marshalable

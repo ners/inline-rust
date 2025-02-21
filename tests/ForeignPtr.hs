@@ -1,7 +1,3 @@
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
-
 module ForeignPtr where
 
 import Language.Rust.Inline

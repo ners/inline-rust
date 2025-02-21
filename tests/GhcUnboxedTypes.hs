@@ -1,4 +1,6 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell, MagicHash, UnliftedFFITypes #-}
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE UnliftedFFITypes #-}
+
 module GhcUnboxedTypes where
 
 import Language.Rust.Inline

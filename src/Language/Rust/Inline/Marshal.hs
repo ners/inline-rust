@@ -59,7 +59,6 @@ ghcMarshallable ty = do
    tyconsB <- sequence qTyconsBoxed
    bytestring <- [t| ByteString |]
    fptrCons <- [t| ForeignPtr |]
-   maybeCons <- [t| Maybe |]
 
    let unboxedDirect = MarshalForm
            { passByValue = True

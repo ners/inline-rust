@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 module SimpleTypes where
 
 import Language.Rust.Inline
