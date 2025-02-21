@@ -77,7 +77,7 @@ module Language.Rust.Inline (
     newArray,
     withByteString,
     unsafeLocalState,
-    mkStorable,
+    mkMarshalable,
     mkReprC,
 
     Marshalable.PeekType,
@@ -95,7 +95,7 @@ import Language.Rust.Inline.Marshal
 import Language.Rust.Inline.Parser
 import Language.Rust.Inline.Pretty
 import Language.Rust.Inline.TH.ReprC (mkReprC)
-import Language.Rust.Inline.TH.Storable (mkStorable)
+import Language.Rust.Inline.TH.Marshalable (mkMarshalable)
 
 import Language.Haskell.TH.Lib
 import Language.Haskell.TH.Quote (QuasiQuoter (..))

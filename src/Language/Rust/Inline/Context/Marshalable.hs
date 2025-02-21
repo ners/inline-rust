@@ -21,7 +21,6 @@ import qualified Foreign
 import Data.ByteString (ByteString)
 import Data.ByteString.Internal (ByteString(PS))
 import qualified Data.ByteString.Unsafe as ByteString
-import Language.Rust.Inline.Context.Prelude ()
 
 class Storable (WithPtrType a) => HasWith a where
     type WithPtrType a

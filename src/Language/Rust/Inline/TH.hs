@@ -1,9 +1,9 @@
 
-module Language.Rust.Inline.TH ( adtCtx, rustTyCtx, mkStorable, mkTupleStorable ) where
+module Language.Rust.Inline.TH ( adtCtx, rustTyCtx, mkMarshalable, mkTupleMarshalable ) where
 
 import Language.Rust.Inline.TH.Utilities  ( getTyConOpt, getTyCon )
 import Language.Rust.Inline.TH.ReprC
-import Language.Rust.Inline.TH.Storable ( mkStorable, mkTupleStorable )
+import Language.Rust.Inline.TH.Marshalable ( mkMarshalable, mkTupleMarshalable )
 import Language.Rust.Inline.Context
 import Language.Rust.Inline.Internal
 import Language.Rust.Inline.Pretty

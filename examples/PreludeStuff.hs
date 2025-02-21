@@ -15,7 +15,7 @@ setCrateRoot []
 
 -- Some ADTs
 data Point a = Point a a deriving (Show)
-mkStorable [t| forall a. Storable a => Storable (Point a) |]
+mkMarshalable [t| forall a. Storable a => Storable (Point a) |]
 extendContext (rustTyCtx [t| forall a. Point a |])
 
 main = do

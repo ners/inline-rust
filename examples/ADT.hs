@@ -15,7 +15,7 @@ data Point a = Point a a deriving (Show)
 -- data Either ... {- already defined in 'Data.Either'
 
 -- Make some 'Storable' instances
-mkStorable [t| forall a. Storable a => Storable (Point a) |]
+mkMarshalable [t| forall a. Storable a => Storable (Point a) |]
 
 -- Generate corresponding Rust types
 extendContext (rustTyCtx [t| forall a. Point a |])

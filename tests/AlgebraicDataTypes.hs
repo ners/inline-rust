@@ -18,11 +18,11 @@ import Data.Int       ( Int8, Int16, Int32, Int64 )
 
 -- | A struct-like ADT where the fields have different sizes
 data StructLike = StructLike  Int16 Int64 deriving (Show, Eq)
-mkStorable [t| Storable StructLike |]
+mkMarshalable [t| Storable StructLike |]
 
 -- | A struct-like newtype ADT where the field is compound
 newtype StructLike2 = StructLike2 (Int16, Int64) deriving (Show, Eq)
-mkStorable [t| Storable StructLike2 |]
+mkMarshalable [t| Storable StructLike2 |]
 
 
 -- | An ADT where:
@@ -35,14 +35,14 @@ data Foo
   | Baz Char Int
   | Qux (Complex Float) Char 
   deriving (Show, Eq)
-mkStorable [t| Storable Foo |]
+mkMarshalable [t| Storable Foo |]
 
 -- | An ADT where fields are nested ADTs
 data Croc
   = Lob (Maybe Foo) Int
   | Boo Int8 Int8
   deriving (Show, Eq)
-mkStorable [t| Storable Croc |]
+mkMarshalable [t| Storable Croc |]
 
 -- | A polymorphic ADT. (From the @these@ package).
 data These a b
@@ -50,7 +50,7 @@ data These a b
   | That b     
   | Both a b
   deriving (Show, Eq)
-mkStorable [t| forall a b. (Storable a, Storable b) => Storable (These a b) |]
+mkMarshalable [t| forall a b. (Storable a, Storable b) => Storable (These a b) |]
 
 -- | An ADT that needs more that a 'Word8' to store the tag
 data Big a
@@ -85,7 +85,7 @@ data Big a
   | C280 | C281 | C282 | C283 | C284 | C285 | C286 | C287 | C288 | C289
   | C290 | C291 | C292 | C293 | C294 | C295 | C296 | C297 | C298 | C299 a
   deriving (Show, Eq)
-mkStorable [t| forall a. Storable a => Storable (Big a) |]
+mkMarshalable [t| forall a. Storable a => Storable (Big a) |]
 
 -- | An ADT with a mixture of polymorphism and not.
 data Foo2 a
@@ -94,7 +94,7 @@ data Foo2 a
   | Qux2 a a
   | Quux2 Int a
   deriving (Show, Eq)
-mkStorable [t| forall a. Storable a => Storable (Foo2 a) |]
+mkMarshalable [t| forall a. Storable a => Storable (Foo2 a) |]
 
 
 -- Set the context

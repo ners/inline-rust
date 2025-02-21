@@ -8,7 +8,6 @@ Stability   : experimental
 Portability : GHC
 -}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -w #-}
@@ -38,8 +37,8 @@ import Data.Maybe    ( fromMaybe )
 --   * Tuples up and including to arity 16
 --
 -- Note that arity 0 is in 'Foreign.Storable' and arity 1 makes no sense in Haskell.
-mkStorable [t| forall a. Storable a => Storable (Maybe a) |]
-mkStorable [t| forall l r. (Storable l, Storable r) => Storable (Either l r) |]
+mkMarshalable [t| forall a. Storable a => Storable (Maybe a) |]
+mkMarshalable [t| forall l r. (Storable l, Storable r) => Storable (Either l r) |]
 fmap join (traverse mkTupleStorable [2..16])
 
 -- | Make a generic path type (e.g. something like @Vec<T>@).
