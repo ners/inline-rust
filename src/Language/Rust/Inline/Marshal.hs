@@ -15,7 +15,6 @@ Portability : GHC
 module Language.Rust.Inline.Marshal where
 
 import Language.Rust.Inline.Context
-import Language.Rust.Inline.Context.Marshalable (PeekType, WithPtrType)
 
 import Language.Haskell.TH 
 import Language.Haskell.TH.Syntax  ( addTopDecls ) 
@@ -36,7 +35,6 @@ import GHC.Exts
 
 data MarshalForm = MarshalForm
     { passByValue :: Bool
-    , marshalStep :: Bool
     , returnByValue :: Bool
     , returnType :: Type -> Q Type
     , argumentType :: Type -> Q Type
@@ -57,12 +55,12 @@ ghcMarshallable ty = do
    simpleB <- sequence qSimpleBoxed
    tyconsU <- sequence qTyconsUnboxed
    tyconsB <- sequence qTyconsBoxed
+   unitType <- [t| () |]
    bytestring <- [t| ByteString |]
    fptrCons <- [t| ForeignPtr |]
 
    let unboxedDirect = MarshalForm
            { passByValue = True
-           , marshalStep = False
            , returnByValue = True
            , returnType = pure
            , argumentType = pure
@@ -70,34 +68,32 @@ ghcMarshallable ty = do
            , addIOUnit = False
            }
        boxedDirect = unboxedDirect{ returnType = \t -> [t|IO $(pure t)|], runsInIO = True }
+       unitDirect = boxedDirect { passByValue = False, argumentType = \t -> [t|Ptr $(pure t)|] }
        boxedIndirect = MarshalForm
            { passByValue = False
-           , marshalStep = True
            , returnByValue = False
-           , returnType = \t -> [t|Ptr (PeekType $(pure t))|]
-           , argumentType = \t -> [t|Ptr (WithPtrType $(pure t))|]
+           , returnType = const [t|Ptr ()|]
+           , argumentType = \t -> [t|Ptr $(pure t)|]
            , runsInIO = True
            , addIOUnit = True
            }
        foreignPtr = MarshalForm
            { passByValue = False
-           , marshalStep = True
            , returnByValue = False
            , returnType = \case
                 AppT _ r -> [t|Ptr (Ptr $(pure r), FunPtr (Ptr $(pure r) -> IO ()))|]
                 t -> fail $ "Cannot marshal " <> (show . pprParendType) t <> " as a ForeignPtr"
            , argumentType = \case
-                AppT _ r -> [t|Ptr (Ptr $(pure r))|]
+                AppT _ r -> [t|Ptr (ForeignPtr $(pure r))|]
                 t -> fail $ "Cannot marshal " <> (show . pprParendType) t <> " as a ForeignPtr"
            , runsInIO = True
            , addIOUnit = True
            }
        byteString = MarshalForm
            { passByValue = False
-           , marshalStep = True
            , returnByValue = False
            , returnType = const [t|Ptr (Ptr Word8, Word, FunPtr (Ptr Word8 -> Word -> IO ()))|]
-           , argumentType = const [t|Ptr (Ptr Word8, Word)|]
+           , argumentType = const [t|Ptr ByteString|]
            , runsInIO = True
            , addIOUnit = True
            }
@@ -105,6 +101,7 @@ ghcMarshallable ty = do
    case ty of
      _          | ty  `elem` simpleU -> pure unboxedDirect
                 | ty  `elem` simpleB -> pure boxedDirect
+                | ty == unitType     -> pure unitDirect
                 | ty == bytestring   -> pure byteString
      AppT con _ | con `elem` tyconsU -> pure unboxedDirect
                 | con `elem` tyconsB -> pure boxedDirect
@@ -131,7 +128,7 @@ ghcMarshallable ty = do
                    , [t| Double |]
                    , [t| Float  |]
                    
-                   , [t| Bool |], [t| () |] -- TODO: let through `IO ()` but not `()`
+                   , [t| Bool |]
                    
                    , [t| Int8  |], [t| Int16  |], [t| Int32  |], [t| Int64  |]
                    , [t| Word8 |], [t| Word16 |], [t| Word32 |], [t| Word64 |]

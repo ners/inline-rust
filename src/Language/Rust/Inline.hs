@@ -80,8 +80,6 @@ module Language.Rust.Inline (
     mkMarshalable,
     mkReprC,
 
-    Marshalable.PeekType,
-
     -- * Top-level Rust items
 ) where
 
@@ -362,7 +360,8 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
             case arg of
                 Nothing -> fail ("Could not find Haskell variable ‘" ++ argStr ++ "’")
                 Just argName
-                    | marshalStep marshalForm -> do
+                    | passByValue marshalForm -> goArgs (varE argName : acc) args
+                    | otherwise -> do
                         x <- newName "x"
                         [e|
                             Marshalable.with
@@ -371,7 +370,6 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
                                     $(goArgs (varE x : acc) args)
                                 )
                             |]
-                    | otherwise -> goArgs (varE argName : acc) args
 
     let haskCall' = goArgs [] (rustArgNames `zip` marshalForms)
         haskCall =
@@ -386,6 +384,9 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
         -- mergeArgs :: Ty Span -> Maybe RType -> (Ty Span, Ty Span)
         mergeArgs t Nothing = (t, t)
         mergeArgs t (Just tInter) = (fmap (const mempty) tInter, t)
+
+    -- EitherC 
+    -- EitherC -> Result
 
     -- Generate the Rust function.
     let retByVal = returnByValue returnFfi

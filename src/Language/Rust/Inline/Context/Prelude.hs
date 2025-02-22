@@ -15,7 +15,10 @@ Portability : GHC
 module Language.Rust.Inline.Context.Prelude where
 
 import Language.Rust.Inline.Context
+import Language.Rust.Inline.Context.Marshalable
 import Language.Rust.Inline.TH
+import Language.Rust.Inline.TH.Storable (mkStorable, mkTupleStorable)
+import Language.Rust.Inline.TH.Marshalable (mkMarshalable, mkTupleMarshalable)
 
 import Language.Rust.Data.Ident            ( Ident(..), mkIdent )
 
@@ -37,8 +40,9 @@ import Data.Maybe    ( fromMaybe )
 --   * Tuples up and including to arity 16
 --
 -- Note that arity 0 is in 'Foreign.Storable' and arity 1 makes no sense in Haskell.
-mkMarshalable [t| forall a. Storable a => Storable (Maybe a) |]
-mkMarshalable [t| forall l r. (Storable l, Storable r) => Storable (Either l r) |]
+mkMarshalable [t| forall a. Marshalable a => Marshalable (Maybe a) |]
+mkMarshalable [t| forall l r. (Marshalable l, Marshalable r) => Marshalable (Either l r) |]
+
 fmap join (traverse mkTupleMarshalable [2..16])
 
 -- | Make a generic path type (e.g. something like @Vec<T>@).

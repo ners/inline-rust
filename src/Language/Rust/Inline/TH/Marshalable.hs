@@ -8,9 +8,10 @@ Stability   : experimental
 Portability : GHC
 -}
 
-{-# LANGUAGE TemplateHaskellQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# OPTIONS_GHC -Wwarn #-}         -- TODO: GHC bug around "unused pattern binds" in splices
+{-# LANGUAGE TypeApplications #-}
                                    -- TODO: GHC feature around setting extensions from within TH
 module Language.Rust.Inline.TH.Marshalable (
   mkMarshalable,
@@ -24,9 +25,10 @@ import Language.Haskell.TH.Syntax hiding (lift)
 import Control.Monad.Trans.State ( StateT(..), get, put )
 import Control.Monad.Trans.Class ( lift )
 import Data.Traversable          ( for )
-import Foreign.Ptr               ( plusPtr, castPtr, Ptr )
+import Foreign.Ptr               ( alignPtr, plusPtr, castPtr, Ptr )
 import Data.Word                 ( Word8, Word16, Word32, Word64 )
 import Language.Rust.Inline.Context.Marshalable
+import qualified Foreign
 
 -- | Generate 'Marshalable' instance for a non-recursive simple algebraic data
 -- type. The instance follows the usual C layout for determining alignment and
@@ -55,24 +57,22 @@ mkMarshalable tyq = do
   (_,cons') <- getConstructors ty'
 
   -- Produce the instance
-  methods <- processADT [ (nameCon n, tyArgs) | (n,tyArgs) <- cons' ] 
-  dec <- instanceD (pure ctx) (pure (AppT marshalable ty')) (map pure methods)
-  pure [dec]
+  decs' <- processADT [ (nameCon n, tyArgs) | (n,tyArgs) <- cons' ]
+  pure . pure $ InstanceD Nothing ctx (AppT marshalable ty') decs'
 
 mkTupleMarshalable :: Int     -- ^ arity of tuple
                    -> Q [Dec] -- ^ the instance declaration
 mkTupleMarshalable n = do
-  storable <- [t| Marshalable |]
+  marshalable <- [t| Marshalable |]
   tyVars <- sequence (take n [ newName (c : show i)
                              | i <- [(1 :: Int)..]
                              , c <- ['a'..'z']
                              ])
-  let ctx = [ AppT storable (VarT tyVar) | tyVar <- tyVars ]
-  let instHead = AppT storable (foldl AppT (TupleT n) (map VarT tyVars))
+  let ctx c = [ AppT c (VarT tyVar) | tyVar <- tyVars ]
+  let instHead c = AppT c (foldl AppT (TupleT n) (map VarT tyVars))
 
-  methods <- processADT [ (tupCon, map VarT tyVars) ]
-  let dec = InstanceD Nothing ctx instHead methods
-  pure [dec]
+  decs' <- processADT [ (tupCon, map VarT tyVars) ]
+  pure . pure $ InstanceD Nothing (ctx marshalable) (instHead marshalable) decs'
 
 -- * Constructor utilities
 data Constructor = Constructor
@@ -128,8 +128,22 @@ type StructState = StateT Alignment Q
 listTE :: [TExp a] -> TExp [a]
 listTE = TExp . ListE . map unType
 
+-- * With and Peek helper functions 
 
--- * Peek and poke helper functions 
+-- | TODO: vkleen will write docs
+withCon :: Constructor       -- ^ name of the constructor
+        -> [Exp -> Q Exp]    -- ^ how to offset to every field
+        -> Name              -- ^ the base pointer
+        -> Name              -- ^ the name of the continuation parameter
+        -> Q (Pat, Exp)      -- ^ an expression for poking the constructor
+withCon con fieldOffsets ptr k = do
+  (ns, fields) <- unzip <$> do
+    for fieldOffsets $ \offset -> do
+       n <- newName "n"
+       pure (VarP n, [e| withLoc $(varE n) $(offset (VarE ptr)) |])
+  let pat = conPat con ns
+  f <- foldr (\b e -> [e| $b $e |]) (varE k) fields
+  pure (pat, f)
 
 -- | Produces a 'do' block for peeking a constructor. The generated code has the
 -- following shape:
@@ -143,59 +157,43 @@ listTE = TExp . ListE . map unType
 -- @
 --
 peekCon :: Constructor       -- ^ name of the constructor
-        -> [Exp -> Q Exp]    -- ^ how to peek every field
+        -> [Exp -> Q Exp]    -- ^ how to offset to every field
         -> Name              -- ^ the base pointer
         -> Q Exp             -- ^ a 'do' expression for peeking the constructor
-peekCon con peekFields ptr = do
+peekCon con fieldOffsets ptr = do
   (ns, binds) <- unzip <$> do
-    for peekFields $ \fldCont -> do
+    for fieldOffsets $ \offset -> do
        n <- newName "n"
-       pure (varE n, bindS (varP n) (fldCont (VarE ptr)))
+       pure (varE n, bindS (varP n) [e| peek $(offset (VarE ptr)) |])
   let ret = [e| return $(conExp con <$> sequence ns) |]
   doE (binds ++ [noBindS ret])
 
--- | Produces a 'do' block for poking a constructor, along with a pattern for
--- extracting out the right fields. Given a pattern like @Con f1 f2 ... fn@, the
--- generated block has the following shape:
---
--- @
---     do ... ptr f1
---        ... ptr f2
---        ...
---        ... ptr fn
--- @
-pokeCon :: Constructor       -- ^ name of the constructor
-        -> [Exp -> Q Exp]    -- ^ how to poke every field
-        -> Name              -- ^ the base poniter
-        -> Q (Pat, Exp)      -- ^ a pattern to match, an expression for poking
-pokeCon con pokeFields ptr = do
-  (ns, stmts) <- unzip <$> do
-    for pokeFields $ \fldCont -> do
-        n <- newName "n"
-        pure (varP n, noBindS [e| $(fldCont (VarE ptr)) $(varE n) |])
-  pat <- conPat con <$> sequence ns
-  expr <- if null stmts then [e| pure () |] else doE stmts
-  return (pat, expr)
+alignQInt :: Q Exp -> Q Exp -> Q Exp
+alignQInt size alignment = [e| (($size + $alignment - 1) `div` $alignment) * $alignment |]
 
+alignCodeInt :: Code Q Int -> Code Q Int -> Code Q Int
+alignCodeInt size alignment = [|| (($$size + $$alignment - 1) `div` $$alignment) * $$alignment ||]
 
 -- * Traversing fields (putting everything together)
 
--- TODO: look at `alignPtr :: Ptr a -> Int -> Ptr a`
-
 -- | Process a field of a given type.
-processField :: Type -> StructState (Exp -> Q Exp, Exp -> Q Exp)
-processField ty = do
+processField :: Name -> Name -> Type -> StructState (Exp -> Q Exp)
+processField alignment sizeOf ty = do
   let alignTy, sizeTy :: Code Q Int
-      alignTy  = Code $ TExp <$> [e| alignment (undefined :: $(pure ty)) |]
-      sizeTy   = Code $ TExp <$> [e| sizeOf    (undefined :: $(pure ty)) |]
+      alignTy  = Code $ TExp <$> [e| $(varE alignment) (undefined :: $(pure ty)) |]
+      sizeTy   = Code $ TExp <$> [e| $(varE sizeOf)    (undefined :: $(pure ty)) |]
 
   -- get state at the end of the last field
-  Alignment prevDecs prevOff prevAlign <- get
+  (Alignment prevDecs prevOff prevAlign) <- get
+
+  -- where to peek: align (prevOff) currentAlign
+  -- new total alignment: max prevAlign currentAlign
+  -- new offset: where to peek + currentSize
 
   -- beginning offset
   beginOffV <- lift $ newName "beginOff"
   let beginOffE, beginOff :: Code Q Int
-      beginOffE = [|| $$prevOff + mod (negate $$prevOff) $$alignTy ||]
+      beginOffE = alignCodeInt prevOff alignTy
       beginOff = Code $ TExp <$> varE beginOffV
   assignBeginOff <- lift [d| $(varP beginOffV) = $(unType <$> examineCode beginOffE) |]
 
@@ -209,7 +207,7 @@ processField ty = do
   -- alignment after this field
   newAlignV <- lift $ newName "algn"
   let newAlignE :: Code Q Int
-      newAlignE = [|| $$alignTy `max` $$prevAlign ||]
+      newAlignE = [|| max $$alignTy $$prevAlign ||]
   newAlign <- lift (TExp <$> varE newAlignV)
   assignNewAlign <- lift [d| $(varP newAlignV) = $(unType <$> examineCode newAlignE) |]
   
@@ -224,57 +222,58 @@ processField ty = do
                  })
 
   -- TODO: consider degenerate sizeof(..) = 0 cases
-  pure ( \addrE -> [e| peek (castPtr $(pure addrE) `plusPtr` $(unType <$> examineCode beginOff)) |]
-       , \addrE -> [e| poke (castPtr $(pure addrE) `plusPtr` $(unType <$> examineCode beginOff)) |]
-       )
+  pure $ \addrE -> [e| (castPtr $(pure addrE) `plusPtr` $(unType <$> examineCode beginOff)) |]
 
 
 -- | Process an algebraic data type.
 --
 -- TODO: think about the zero constructor case...
 processADT :: [(Constructor, [Type])]  -- ^ constructors and the types of their fields
-           -> Q (Dec, Dec)             -- ^ with and peek implementations
+           -> Q [Dec]                  -- ^ marshalable implementations
 
 -- The one constructor case is special - we don't need to specify a tag
 processADT [(con, fields)] = do
-  
   initAlign <- mempty
-  (peekPokes, Alignment ds off algn)
-    <- runStateT (traverse processField fields) initAlign
-  let ds' = map pure ds
+  (offsetsWith, Alignment dsWith sizeWith algnWith) <- runStateT (traverse (processField 'alignmentWith 'sizeOfWith) fields) initAlign
+  (offsetsPeek, Alignment dsPeek sizePeek algnPeek) <- runStateT (traverse (processField 'alignmentPeek 'sizeOfPeek) fields) initAlign
 
-  -- sizeOf
-  sizeOf_    <- do
-    Just sizeOfN <- lookupValueName "sizeOf"
-    funD sizeOfN [clause [wildP]
-                         (normalB [e| let c = $(unType <$> examineCode off)
-                                      in c + mod (negate c) $(unType <$> examineCode algn) |])
-                         ds']
+  sizeOfWith' <- funD
+    (mkName "sizeOfWith")
+    [clause [wildP]
+        (NormalB . unType <$> examineCode (alignCodeInt sizeWith algnWith))
+        (pure <$> dsWith)]
 
-  -- alignment
-  alignment_ <- do
-    Just alignmentN <- lookupValueName "alignment"
-    funD alignmentN [clause [wildP] (normalB (unType <$> examineCode algn)) ds']
+  alignmentWith' <- funD
+    (mkName "alignmentWith")
+    [clause [wildP]
+        (NormalB . unType <$> examineCode algnWith)
+        (pure <$> dsWith)]
 
-  let (peekFields, pokeFields) = unzip peekPokes
-  
-  -- peek
-  peek_ <- do
+  withLoc' <- do
     ptr <- newName "ptr"
-    Just peekN <- lookupValueName "peek"
-    funD peekN [clause [varP ptr] (normalB (peekCon con peekFields ptr)) ds']
+    k <- newName "k"
+    (pat, body) <- withCon con offsetsWith ptr k
+    funD (mkName "withLoc") [clause [pure pat, varP ptr, varP k] (normalB $ pure body) (pure <$> dsWith)]
 
-  -- poke
-  poke_ <- do
+  sizeOfPeek' <- funD
+    (mkName "sizeOfPeek")
+    [clause [wildP]
+        (NormalB . unType <$> examineCode (alignCodeInt sizePeek algnPeek))
+        (pure <$> dsPeek)]
+
+  alignmentPeek' <- funD
+    (mkName "alignmentPeek")
+    [clause [wildP]
+        (NormalB . unType <$> examineCode algnPeek)
+        (pure <$> dsPeek)]
+
+  peek' <- do
     ptr <- newName "ptr"
-    (cPat,body) <- pokeCon con pokeFields ptr
-    Just pokeN <- lookupValueName "poke"
-    funD pokeN [clause [varP ptr, pure cPat] (normalB (pure body)) ds']
+    funD (mkName "peek") [clause [varP ptr] (normalB (peekCon con offsetsPeek ptr)) (pure <$> dsPeek)]
 
-  pure [sizeOf_, alignment_, peek_, poke_]
+  pure [sizeOfWith', alignmentWith', withLoc', sizeOfPeek', alignmentPeek', peek']
 
 processADT cons = do
-
   let discNum = length cons
   discTy <- snd . head . dropWhile (\(m,_) -> discNum > m + 1) $
               [ (fromIntegral (maxBound :: Word8),  [t| Word8  |])
@@ -282,69 +281,76 @@ processADT cons = do
               , (fromIntegral (maxBound :: Word32), [t| Word32 |])
               , (fromIntegral (maxBound :: Word64), [t| Word64 |])
               ]
-
+ 
   initAlign <- mempty
-  (conPeekPokess, algns) <- unzip <$> do
+  (conWithsPeeks, algnsWith, algnsPeek) <- unzip3 <$> do
     for cons $ \(con, fields) -> do
-      (peekPokes, algn) <- runStateT (traverse processField fields) initAlign
-      let (peekFields, pokeFields) = unzip peekPokes
-      pure ((con, peekFields, pokeFields), algn)
-  Alignment ds off algn <- mconcat (map pure algns)
-  let discSizeOf = [e| sizeOf (undefined :: $(pure discTy)) |]
-      algn' = [e| $discSizeOf `max` $(unType <$> examineCode algn) |]
-  let ds' = map pure ds
+      (offsetsWith, algnWith) <- runStateT (traverse (processField 'alignmentWith 'sizeOfWith) fields) initAlign
+      (offsetsPeek, algnPeek) <- runStateT (traverse (processField 'alignmentPeek 'sizeOfPeek) fields) initAlign
+      pure ((con, offsetsWith, offsetsPeek), algnWith, algnPeek)
+  let (Alignment dsWith offWith algnWith) = mconcat algnsWith
+  let (Alignment dsPeek offPeek algnPeek) = mconcat algnsPeek
+  let discSizeOf = [e| Foreign.sizeOf (undefined :: $(pure discTy)) |]
+      discAlign = [e| Foreign.alignment (undefined :: $(pure discTy)) |]
 
-  -- sizeOf
-  sizeOf_ <- do
-    Just sizeOfN <- lookupValueName "sizeOf"
-    funD sizeOfN [clause [wildP]
-                         (normalB [e| let c = $(unType <$> examineCode off)
-                                      in $algn' + c + mod (negate c) $algn' |])
-                         ds']
+  sizeOfWith' <- funD
+    (mkName "sizeOfWith")
+    [clause [wildP]
+        (normalB [e| $(alignQInt discSizeOf (unType <$> examineCode algnWith)) + $(unType <$> examineCode offWith) |])
+        (pure <$> dsWith)]
 
-  -- alignment
-  alignment_ <- do
-    Just alignmentN <- lookupValueName "alignment"
-    funD alignmentN [clause [wildP] (normalB algn') ds']
+  alignmentWith' <- funD
+    (mkName "alignmentWith")
+    [clause [wildP]
+        (normalB [e| max $(discAlign) $(unType <$> examineCode algnWith) |])
+        (pure <$> dsWith)]
 
-  -- peek
-  peek_ <- do
+  withLoc' <- do
     ptr <- newName "ptr"
     ptrOff <- newName "ptrOff"
-    d' <- [d| $(varP ptrOff) = $(varE ptr) `plusPtr` $algn' |]
-    disc <- newName "disc"
-    let mtchs = [ match (litP n') (normalB (peekCon con peekFields ptrOff)) []
-                | (n, (con, peekFields, _)) <- zip [0..] conPeekPokess
+    k <- newName "k"
+    d' <- [d| $(varP ptrOff) = ($(varE ptr) `plusPtr` $(discSizeOf)) `alignPtr` $(unType <$> examineCode algnWith) |]
+    x <- newName "x"
+
+    let mtchs = [ do (pat, body) <- patBody
+                     match (pure pat)
+                           (normalB . doE $ noBindS <$> [ [e| Foreign.poke (Foreign.castPtr $(varE ptr) :: Ptr $(pure discTy)) $(litE n') |]
+                                                        , pure body
+                                                        ])
+                           []
+                | (n, (con, offsetsWith, _)) <- zip [0..] conWithsPeeks
+                , let patBody = withCon con offsetsWith ptrOff k
                 , let n' = IntegerL n
                 ]
-    Just peekN <- lookupValueName "peek"
-    funD peekN
+
+    funD (mkName "withLoc") [clause [varP x, varP ptr, varP k] (normalB $ caseE (varE x) mtchs) (pure <$> d' ++ dsWith)]
+
+  sizeOfPeek' <- funD
+    (mkName "sizeOfPeek")
+    [clause [wildP]
+        (normalB [e| $(alignQInt discSizeOf (unType <$> examineCode algnPeek)) + $(unType <$> examineCode offPeek) |])
+        (pure <$> dsPeek)]
+
+  alignmentPeek' <- funD
+    (mkName "alignmentPeek")
+    [clause [wildP]
+        (NormalB . unType <$> examineCode algnPeek)
+        (pure <$> dsPeek)]
+
+  peek' <- do
+    ptr <- newName "ptr"
+    ptrOff <- newName "ptrOff"
+    d' <- [d| $(varP ptrOff) = ($(varE ptr) `plusPtr` $(discSizeOf)) `alignPtr` $(unType <$> examineCode algnPeek) |]
+    disc <- newName "disc"
+    let mtchs = [ match (litP n') (normalB (peekCon con offsetsPeek ptrOff)) []
+                | (n, (con, _, offsetsPeek)) <- zip [0..] conWithsPeeks
+                , let n' = IntegerL n
+                ]
+    funD (mkName "peek")
          [clause [varP ptr]
-                 (normalB (doE [ bindS (varP disc) [e| peek (castPtr $(varE ptr) :: Ptr $(pure discTy)) |]
+                 (normalB (doE [ bindS (varP disc) [e| Foreign.peek (castPtr $(varE ptr) :: Ptr $(pure discTy)) |]
                                , noBindS (caseE (varE disc) mtchs)
                                ]))
-                 (map pure d' ++ ds')]
-
-  -- poke
-  poke_ <- do
-    ptr <- newName "ptr"
-    ptrOff <- newName "ptrOff"
-    d' <- [d| $(varP ptrOff) = $(varE ptr) `plusPtr` $algn' |]
-    disc <- newName "disc"
-    let mtchs = [ do { (pat,body) <- patBody
-                     ; match (pure pat)
-                             (normalB (doE (map noBindS [ [e| poke (castPtr $(varE ptr) :: Ptr $(pure discTy)) $(litE n') |]
-                                                          , pure body
-                                                        ])))
-                             []
-                     }
-                | (n, (con, _, pokeFields)) <- zip [0..] conPeekPokess
-                , let patBody = pokeCon con pokeFields ptrOff
-                , let n' = IntegerL n
-                ]
-    Just pokeN <- lookupValueName "poke"
-    funD pokeN
-         [clause [varP ptr, varP disc] (normalB (caseE (varE disc) mtchs)) (map pure d' ++ ds')]
-
-  pure [sizeOf_, alignment_, peek_, poke_]
-
+                 (pure <$> d' ++ dsPeek)]
+ 
+  pure [sizeOfWith', alignmentWith', withLoc', sizeOfPeek', alignmentPeek', peek']

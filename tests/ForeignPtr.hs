@@ -56,18 +56,18 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
                 } |]
         withForeignPtr (fromJust mp) peek >>= (`shouldBe` 42)
 
-    -- it "Can marshal result ForeignPtr returns" $ do
-    --     let mp =
-    --             [rust| Result<ForeignPtr<u64>, ()> {
-    --                 Err(())
-    --             } |]
-    --     mp `shouldBe` Left ()
+    it "Can marshal result ForeignPtr returns" $ do
+        let mp =
+                [rust| Result<ForeignPtr<u64>, ()> {
+                    Err(())
+                } |]
+        mp `shouldBe` Left ()
 
-    --     let mp =
-    --             [rust| Result<ForeignPtr<u64>, ()> {
-    --                 Ok(Box::new(42).into())
-    --             } |]
-    --     withForeignPtr (fromRight mp) peek >>= (`shouldBe` 42)
+        let mp =
+                [rust| Result<ForeignPtr<u64>, ()> {
+                    Ok(Box::new(42).into())
+                } |]
+        withForeignPtr (fromRight undefined mp) peek >>= (`shouldBe` 42)
 
     it "still has working pointers" $
         alloca $ \p -> do

@@ -1,9 +1,19 @@
 
-module Language.Rust.Inline.TH ( adtCtx, rustTyCtx, mkMarshalable, mkTupleMarshalable ) where
+module Language.Rust.Inline.TH
+    ( adtCtx
+    , rustTyCtx
+    , mkStorable
+    , mkTupleStorable
+    , Marshalable(..)
+    , mkMarshalable
+    , mkTupleMarshalable
+    ) where
 
 import Language.Rust.Inline.TH.Utilities  ( getTyConOpt, getTyCon )
 import Language.Rust.Inline.TH.ReprC
-import Language.Rust.Inline.TH.Marshalable ( mkMarshalable, mkTupleMarshalable )
+import Language.Rust.Inline.TH.Storable ( mkStorable, mkTupleStorable )
+import Language.Rust.Inline.Context.Marshalable (Marshalable(..))
+import Language.Rust.Inline.TH.Marshalable (mkMarshalable, mkTupleMarshalable )
 import Language.Rust.Inline.Context
 import Language.Rust.Inline.Internal
 import Language.Rust.Inline.Pretty
@@ -83,7 +93,7 @@ rustTyCtx tyq = do
   (_, ty) <-
     case ty' of
       ForallT tyvars [] t -> pure (tyvars, t)
-      ForallT _      _  _ -> fail "rustTyCtx: type cannot have context"
+      ForallT {}          -> fail "rustTyCtx: type cannot have context"
       t                   -> pure ([], t)
 
   -- Get the type and its name

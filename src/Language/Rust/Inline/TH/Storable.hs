@@ -245,32 +245,26 @@ processADT [(con, fields)] = do
   let ds' = map pure ds
 
   -- sizeOf
-  sizeOf_    <- do
-    Just sizeOfN <- lookupValueName "sizeOf"
-    funD sizeOfN [clause [wildP]
+  sizeOf_    <- funD (mkName "sizeOf") [clause [wildP]
                          (normalB [e| let c = $(unType <$> examineCode off)
                                       in c + mod (negate c) $(unType <$> examineCode algn) |])
                          ds']
 
   -- alignment
-  alignment_ <- do
-    Just alignmentN <- lookupValueName "alignment"
-    funD alignmentN [clause [wildP] (normalB (unType <$> examineCode algn)) ds']
+  alignment_ <- funD (mkName "alignment") [clause [wildP] (normalB (unType <$> examineCode algn)) ds']
 
   let (peekFields, pokeFields) = unzip peekPokes
   
   -- peek
   peek_ <- do
     ptr <- newName "ptr"
-    Just peekN <- lookupValueName "peek"
-    funD peekN [clause [varP ptr] (normalB (peekCon con peekFields ptr)) ds']
+    funD (mkName "peek") [clause [varP ptr] (normalB (peekCon con peekFields ptr)) ds']
 
   -- poke
   poke_ <- do
     ptr <- newName "ptr"
     (cPat,body) <- pokeCon con pokeFields ptr
-    Just pokeN <- lookupValueName "poke"
-    funD pokeN [clause [varP ptr, pure cPat] (normalB (pure body)) ds']
+    funD (mkName "poke") [clause [varP ptr, pure cPat] (normalB (pure body)) ds']
 
   pure [sizeOf_, alignment_, peek_, poke_]
 
@@ -296,17 +290,13 @@ processADT cons = do
   let ds' = map pure ds
 
   -- sizeOf
-  sizeOf_ <- do
-    Just sizeOfN <- lookupValueName "sizeOf"
-    funD sizeOfN [clause [wildP]
+  sizeOf_ <- funD (mkName "sizeOf") [clause [wildP]
                          (normalB [e| let c = $(unType <$> examineCode off)
                                       in $algn' + c + mod (negate c) $algn' |])
                          ds']
 
   -- alignment
-  alignment_ <- do
-    Just alignmentN <- lookupValueName "alignment"
-    funD alignmentN [clause [wildP] (normalB algn') ds']
+  alignment_ <- funD (mkName "alignment") [clause [wildP] (normalB algn') ds']
 
   -- peek
   peek_ <- do
@@ -318,8 +308,7 @@ processADT cons = do
                 | (n, (con, peekFields, _)) <- zip [0..] conPeekPokess
                 , let n' = IntegerL n
                 ]
-    Just peekN <- lookupValueName "peek"
-    funD peekN
+    funD (mkName "peek")
          [clause [varP ptr]
                  (normalB (doE [ bindS (varP disc) [e| peek (castPtr $(varE ptr) :: Ptr $(pure discTy)) |]
                                , noBindS (caseE (varE disc) mtchs)
@@ -343,8 +332,7 @@ processADT cons = do
                 , let patBody = pokeCon con pokeFields ptrOff
                 , let n' = IntegerL n
                 ]
-    Just pokeN <- lookupValueName "poke"
-    funD pokeN
+    funD (mkName "poke")
          [clause [varP ptr, varP disc] (normalB (caseE (varE disc) mtchs)) (map pure d' ++ ds')]
 
   pure [sizeOf_, alignment_, peek_, poke_]
