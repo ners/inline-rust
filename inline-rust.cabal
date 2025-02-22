@@ -35,6 +35,7 @@ library
                        Language.Rust.Inline.Marshal
                        Language.Rust.Inline.Parser
                        Language.Rust.Inline.Pretty
+                       Language.Rust.Inline.Storable.Tuple
                        Language.Rust.Inline.TH.Marshalable
                        Language.Rust.Inline.TH.ReprC
                        Language.Rust.Inline.TH.Storable
