@@ -66,8 +66,8 @@ bytestringSpec = describe "ByteStrings" $ do
         rustBs `shouldBe` Just (ByteString.pack [0, 1, 2, 3])
 
     it "can marshal result ByteString return values" $ do
-        let errRustBs = [rust| Result<RustOwnedByteString, ()> { Err(()) } |]
+        let errRustBs = [rust| Result<Vec<u8>, ()> { Err(()) } |]
         errRustBs `shouldBe` Left ()
 
-        let okRustBs = [rust| Result<RustOwnedByteString, ()> { Ok(vec![0, 1, 2, 3].marshal()) } |]
+        let okRustBs = [rust| Result<Vec<u8>, ()> { Ok(vec![0, 1, 2, 3]) } |]
         okRustBs `shouldBe` Right (ByteString.pack [0, 1, 2, 3])

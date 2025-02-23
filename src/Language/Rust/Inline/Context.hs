@@ -61,17 +61,17 @@ type.
 newtype Context
     = Context
         ( [RType -> Context -> First (Q HType, Maybe (Q RType))]
-        , -- Given a Rust type in a quasiquote, we need to look up the
+          -- Given a Rust type in a quasiquote, we need to look up the
           -- corresponding Haskell type (for the FFI import) as well as the
           -- C-compatible Rust type (if the initial Rust type isn't already
           -- @#[repr(C)]@.
 
-          [HType -> Context -> First (Q RType)]
-        , -- Given a field in a Haskell ADT, we need to figure out which
+        , [HType -> Context -> First (Q RType)]
+          -- Given a field in a Haskell ADT, we need to figure out which
           -- (not-necessarily @#[repr(C)]@) Rust type normally maps into this
           -- Haskell type.
 
-          [String]
+        , [String]
           -- Source for the trait impls of @MarshalTo@
         )
     deriving (Semigroup, Monoid, Typeable)

@@ -205,7 +205,7 @@ eitherItems = map unlines
     , "struct RightC<T>(T);"
     ]
     -- impl MarshalInto<EitherC<L,R>> for Result<L,R>
-  , [ "impl<L: Copy, L1:  MarshalInto<L> + Copy, R: Copy, R1: MarshalInto<R> + Copy> MarshalInto<EitherC<L,R>> for Result<R1,L1> {"
+  , [ "impl<L: Copy, L1:  MarshalInto<L>, R: Copy, R1: MarshalInto<R>> MarshalInto<EitherC<L,R>> for Result<R1,L1> {"
     , "  fn marshal(self) -> EitherC<L,R> {"
     , "    match self {"
     , "      Err(l) => EitherC { tag: 0, payload: TaggedEitherC { left: LeftC(l.marshal()) } },"
