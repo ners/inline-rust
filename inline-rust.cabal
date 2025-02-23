@@ -31,6 +31,7 @@ library
                        Language.Rust.Inline.Context.ByteString
                        Language.Rust.Inline.Context.Marshalable
                        Language.Rust.Inline.Context.Prelude
+                       Language.Rust.Inline.Context.Vector
                        Language.Rust.Inline.Internal
                        Language.Rust.Inline.Marshal
                        Language.Rust.Inline.Parser
@@ -92,8 +93,8 @@ test-suite spec
                      , Submodule
                      , Submodule.Submodule
                      , ByteStrings
+                     , Vectors
                      , ForeignPtr
-                     , Concurrency
   build-depends:       async
                      , base
                      , inline-rust

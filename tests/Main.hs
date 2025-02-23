@@ -12,7 +12,6 @@ import Language.Rust.Inline
 
 import AlgebraicDataTypes
 import ByteStrings
-import Concurrency (concurrencySpec)
 import Data.Word
 import Foreign.Marshal.Array
 import Foreign.Ptr
@@ -26,6 +25,7 @@ import SimpleTypes
 import Submodule
 import Submodule.Submodule
 import Test.Hspec
+import Vectors
 
 extendContext basic
 setCrateRoot []
@@ -35,7 +35,7 @@ main = hspec $
   describe "Rust quasiquoter" $ do
     algebraicDataTypes
     bytestringSpec
-    concurrencySpec
+    vectorsSpec
     foreignPtrTypes
     funcPointerTypes
     ghcUnboxedTypes

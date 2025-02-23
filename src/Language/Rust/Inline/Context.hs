@@ -46,6 +46,7 @@ import GHC.Exts (
     Int#,
     Word#,
  )
+import Data.Void (Void)
 
 -- Easier on the eyes
 type RType = Ty ()
@@ -319,10 +320,13 @@ foreignPointers = do
     foreignPtrT <- [t|ForeignPtr|]
     pure $ Context ([rule], [rev foreignPtrT], [foreignPtr, constPtr, mutPtr])
   where
+    htype _ (Just _) = pure ([t| ForeignPtr Void|], Nothing) -- if the pointee needs marshalling, forbid peeking from Haskell
+    htype t Nothing = pure ([t|ForeignPtr $t|], Nothing)
+
     rule (Rptr _ _ t _) context
-        | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
+        | First (Just (t', inter)) <- lookupRTypeInContext t context = htype t' inter
     rule (PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _) context
-        | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
+        | First (Just (t', inter)) <- lookupRTypeInContext t context = htype t' inter
     rule _ _ = mempty
 
     rev _ _ _ = mempty

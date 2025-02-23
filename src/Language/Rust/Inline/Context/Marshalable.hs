@@ -88,7 +88,7 @@ instance Marshalable ByteString where
     alignmentPeek _ = Foreign.alignment (undefined :: (Foreign.Ptr Foreign.Word8, Word, Foreign.FunPtr (Foreign.Ptr Foreign.Word8 -> Word -> IO ())))
     peek p = do
         (ptr, len, finalizer) <- Foreign.peek (castPtr p)
-        ByteString.unsafePackCStringFinalizer ptr (fromIntegral len) (bytestringFree finalizer ptr len)
+        ByteString.unsafePackCStringFinalizer ptr (fromIntegral len) (freeByteString finalizer ptr len)
 
 instance Marshalable (Foreign.ForeignPtr a) where
     sizeOfWith = const $ sizeOf (undefined :: (Foreign.Ptr a))
@@ -102,7 +102,7 @@ instance Marshalable (Foreign.ForeignPtr a) where
         (ptr, finalizer) <- Foreign.peek (castPtr p)
         Foreign.newForeignPtr finalizer ptr
 
-foreign import ccall safe "dynamic" bytestringFree :: Foreign.FunPtr (Foreign.Ptr Foreign.Word8 -> Word -> IO ()) -> Foreign.Ptr Foreign.Word8 -> Word -> IO ()
+foreign import ccall safe "dynamic" freeByteString :: Foreign.FunPtr (Foreign.Ptr Foreign.Word8 -> Word -> IO ()) -> Foreign.Ptr Foreign.Word8 -> Word -> IO ()
 
 instance Marshalable CChar
 instance Marshalable CSChar

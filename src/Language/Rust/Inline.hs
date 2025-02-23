@@ -61,6 +61,7 @@ module Language.Rust.Inline (
     pointers,
     prelude,
     bytestrings,
+    vectors,
     foreignPointers,
 
     -- ** Marshalling
@@ -87,6 +88,7 @@ module Language.Rust.Inline (
 
 import Language.Rust.Inline.Context
 import Language.Rust.Inline.Context.ByteString (bytestrings)
+import Language.Rust.Inline.Context.Vector (vectors)
 import Language.Rust.Inline.Context.Prelude (prelude)
 import Language.Rust.Inline.Internal
 import Language.Rust.Inline.Marshal
