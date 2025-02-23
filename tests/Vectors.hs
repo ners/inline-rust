@@ -17,6 +17,8 @@ setCrateModule
 vectorsSpec :: Spec
 vectorsSpec = describe "Vectors" $ do
     it "can marshal list return values" $ do
+        [rust| Vec<bool> { vec![] } |] `shouldBe` []
+
         let mints = [rust| Vec<Option<u64>> { vec![Some(17), None] } |]
         mints `shouldBe` [Just 17, Nothing]
 
@@ -28,3 +30,7 @@ vectorsSpec = describe "Vectors" $ do
         let ints = [17, 42] :: [Word64]
         let rsum = [rust| u64 { $(ints: Vec<u64>).iter().sum() } |]
         rsum `shouldBe` sum ints
+
+    it "can marshal pairs of lists" $ do
+        let yes = [rust| (Vec<bool>, Vec<bool>) { (vec![], vec![]) } |]
+        yes `shouldBe` ([], [])
