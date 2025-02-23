@@ -1,8 +1,9 @@
 module ForeignPtr where
 
 import Language.Rust.Inline
+import Language.Rust.Quote
 
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isJust)
 import Data.Word (Word64)
 import Foreign (Storable (..))
 import Foreign.ForeignPtr
@@ -15,6 +16,12 @@ extendContext pointers
 extendContext prelude
 extendContext basic
 setCrateModule
+
+
+extendContext (singleton [ty| NotCopy |] [t| () |])
+[rust|
+pub struct NotCopy(());
+|]
 
 foreignPtrTypes :: Spec
 foreignPtrTypes = describe "ForeignPtr types" $ do
@@ -81,3 +88,8 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
                     unsafe { *$(p: *u64) }
                 } |]
             val `shouldBe` 42
+
+    it "still works without Copy" $ do
+        let mp = [rust| Option<ForeignPtr<NotCopy>> { Some(Box::new(NotCopy(())).into()) } |]
+        mp `shouldSatisfy` isJust
+

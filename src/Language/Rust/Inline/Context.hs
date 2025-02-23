@@ -329,9 +329,10 @@ foreignPointers = do
 
     foreignPtr =
         unlines
-            [ "#[derive(Copy, Clone)]"
-            , "#[repr(C)]"
+            [ "#[repr(C)]"
             , "pub struct ForeignPtr<T>(pub *mut T, pub extern \"C\" fn (*mut T));"
+            , "impl<T> Copy for ForeignPtr<T> {}"
+            , "impl<T> Clone for ForeignPtr<T> { fn clone(&self) -> Self { ForeignPtr(self.0, self.1) } }"
             ]
 
     constPtr =
