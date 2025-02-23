@@ -83,10 +83,12 @@
                 packages = ps: [ hp.${pname} ];
                 nativeBuildInputs = with pkgs'; with haskellPackages; [
                   pkgs'.haskellPackages.cabal-install
-                  fourmolu
-                  haskell-language-server
                   cargo
+                  fourmolu
+                  gdb
+                  haskell-language-server
                   rustc
+                  valgrind
                 ];
               };
             });

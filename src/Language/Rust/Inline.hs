@@ -104,6 +104,7 @@ import Foreign.Marshal.Array (newArray, withArrayLen)
 import Foreign.Marshal.Unsafe (unsafeLocalState)
 import Foreign.Marshal.Utils (new, with)
 import Foreign.Ptr (freeHaskellFunPtr)
+import qualified Foreign
 
 import Control.Monad (void)
 import Data.List (intercalate)
@@ -344,7 +345,9 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
             | otherwise = do
                 ret <- newName "ret"
                 [e|
-                    alloca
+                    Foreign.allocaBytesAligned
+                        (Marshalable.sizeOfPeek (undefined :: $(pure haskRet)))
+                        (Marshalable.alignmentPeek (undefined :: $(pure haskRet)))
                         ( \($(varP ret)) ->
                             do
                                 $(appsE (varE qqName : reverse (varE ret : acc)))
@@ -384,9 +387,6 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
         -- mergeArgs :: Ty Span -> Maybe RType -> (Ty Span, Ty Span)
         mergeArgs t Nothing = (t, t)
         mergeArgs t (Just tInter) = (fmap (const mempty) tInter, t)
-
-    -- EitherC 
-    -- EitherC -> Result
 
     -- Generate the Rust function.
     let retByVal = returnByValue returnFfi

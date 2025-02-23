@@ -1,5 +1,3 @@
-{-# LANGUAGE TypeApplications #-}
-
 module ByteStrings where
 
 import Language.Rust.Inline

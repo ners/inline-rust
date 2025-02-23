@@ -12,6 +12,7 @@ import Language.Rust.Inline
 
 import AlgebraicDataTypes
 import ByteStrings
+import Concurrency (concurrencySpec)
 import Data.Word
 import Foreign.Marshal.Array
 import Foreign.Ptr
@@ -34,6 +35,7 @@ main = hspec $
   describe "Rust quasiquoter" $ do
     algebraicDataTypes
     bytestringSpec
+    concurrencySpec
     foreignPtrTypes
     funcPointerTypes
     ghcUnboxedTypes

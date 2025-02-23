@@ -29,6 +29,7 @@ import Foreign.Ptr               ( alignPtr, plusPtr, castPtr, Ptr )
 import Data.Word                 ( Word8, Word16, Word32, Word64 )
 import Language.Rust.Inline.Context.Marshalable
 import qualified Foreign
+import Data.List (intercalate)
 
 -- | Generate 'Marshalable' instance for a non-recursive simple algebraic data
 -- type. The instance follows the usual C layout for determining alignment and
@@ -54,10 +55,10 @@ mkMarshalable tyq = do
       _ -> fail "mkMarshalable: malformed 'Marshalable' instance head"
 
   -- Get the type constructors name
-  (_,cons') <- getConstructors ty'
+  (name,cons') <- getConstructors ty'
 
   -- Produce the instance
-  decs' <- processADT [ (nameCon n, tyArgs) | (n,tyArgs) <- cons' ]
+  decs' <- processADT name [ (nameCon n, tyArgs) | (n,tyArgs) <- cons' ]
   pure . pure $ InstanceD Nothing ctx (AppT marshalable ty') decs'
 
 mkTupleMarshalable :: Int     -- ^ arity of tuple
@@ -68,10 +69,11 @@ mkTupleMarshalable n = do
                              | i <- [(1 :: Int)..]
                              , c <- ['a'..'z']
                              ])
+  let name = mkName $ "(" <> intercalate "," (show <$> tyVars) <> ")"
   let ctx c = [ AppT c (VarT tyVar) | tyVar <- tyVars ]
   let instHead c = AppT c (foldl AppT (TupleT n) (map VarT tyVars))
 
-  decs' <- processADT [ (tupCon, map VarT tyVars) ]
+  decs' <- processADT name [ (tupCon, map VarT tyVars) ]
   pure . pure $ InstanceD Nothing (ctx marshalable) (instHead marshalable) decs'
 
 -- * Constructor utilities
@@ -228,11 +230,12 @@ processField alignment sizeOf ty = do
 -- | Process an algebraic data type.
 --
 -- TODO: think about the zero constructor case...
-processADT :: [(Constructor, [Type])]  -- ^ constructors and the types of their fields
+processADT :: Name                     -- ^ name of the type
+           -> [(Constructor, [Type])]  -- ^ constructors and the types of their fields
            -> Q [Dec]                  -- ^ marshalable implementations
 
 -- The one constructor case is special - we don't need to specify a tag
-processADT [(con, fields)] = do
+processADT _ [(con, fields)] = do
   initAlign <- mempty
   (offsetsWith, Alignment dsWith sizeWith algnWith) <- runStateT (traverse (processField 'alignmentWith 'sizeOfWith) fields) initAlign
   (offsetsPeek, Alignment dsPeek sizePeek algnPeek) <- runStateT (traverse (processField 'alignmentPeek 'sizeOfPeek) fields) initAlign
@@ -273,7 +276,7 @@ processADT [(con, fields)] = do
 
   pure [sizeOfWith', alignmentWith', withLoc', sizeOfPeek', alignmentPeek', peek']
 
-processADT cons = do
+processADT name cons = do
   let discNum = length cons
   discTy <- snd . head . dropWhile (\(m,_) -> discNum > m + 1) $
               [ (fromIntegral (maxBound :: Word8),  [t| Word8  |])
@@ -345,6 +348,11 @@ processADT cons = do
     let mtchs = [ match (litP n') (normalB (peekCon con offsetsPeek ptrOff)) []
                 | (n, (con, _, offsetsPeek)) <- zip [0..] conWithsPeeks
                 , let n' = IntegerL n
+                ]
+                <>
+                [ match wildP (normalB [e|
+                    fail $ "Unknown discriminator for " <> $(liftString $ show name) <> ": " <> show $(varE disc)
+                |]) []
                 ]
     funD (mkName "peek")
          [clause [varP ptr]
