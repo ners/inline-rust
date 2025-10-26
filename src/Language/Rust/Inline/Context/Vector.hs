@@ -80,7 +80,7 @@ instance Marshalable a => Marshalable [a] where
         (ptr, len, finalizer) <- Foreign.peek (Foreign.castPtr p)
         let peekAtOffset :: Word -> IO a
             peekAtOffset offset = Marshalable.peek $ ptr `Foreign.plusPtr` (fromIntegral offset * sizeOfPeek (undefined :: a))
-        list <- foldrM (\a b -> liftA2 (:) (peekAtOffset a) (pure b)) [] $ take (fromIntegral len) [0..]
+        list <- foldrM (\a b -> (:) <$> peekAtOffset a <*> pure b) [] $ take (fromIntegral len) [0..]
         freeVector finalizer ptr len
         pure list
 
