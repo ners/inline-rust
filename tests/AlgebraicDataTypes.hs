@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell, ExplicitForAll, ScopedTypeVariables #-}
 module AlgebraicDataTypes where
 
 import Language.Rust.Inline
@@ -19,11 +18,11 @@ import Data.Int       ( Int8, Int16, Int32, Int64 )
 
 -- | A struct-like ADT where the fields have different sizes
 data StructLike = StructLike  Int16 Int64 deriving (Show, Eq)
-mkStorable [t| Storable StructLike |]
+mkMarshalable [t| Marshalable StructLike |]
 
 -- | A struct-like newtype ADT where the field is compound
 newtype StructLike2 = StructLike2 (Int16, Int64) deriving (Show, Eq)
-mkStorable [t| Storable StructLike2 |]
+mkMarshalable [t| Marshalable StructLike2 |]
 
 
 -- | An ADT where:
@@ -36,14 +35,15 @@ data Foo
   | Baz Char Int
   | Qux (Complex Float) Char 
   deriving (Show, Eq)
-mkStorable [t| Storable Foo |]
+mkMarshalable [t| forall a. Marshalable a => Marshalable (Complex a) |]
+mkMarshalable [t| Marshalable Foo |]
 
 -- | An ADT where fields are nested ADTs
 data Croc
   = Lob (Maybe Foo) Int
   | Boo Int8 Int8
   deriving (Show, Eq)
-mkStorable [t| Storable Croc |]
+mkMarshalable [t| Marshalable Croc |]
 
 -- | A polymorphic ADT. (From the @these@ package).
 data These a b
@@ -51,7 +51,7 @@ data These a b
   | That b     
   | Both a b
   deriving (Show, Eq)
-mkStorable [t| forall a b. (Storable a, Storable b) => Storable (These a b) |]
+mkMarshalable [t| forall a b. (Marshalable a, Marshalable b) => Marshalable (These a b) |]
 
 -- | An ADT that needs more that a 'Word8' to store the tag
 data Big a
@@ -86,7 +86,7 @@ data Big a
   | C280 | C281 | C282 | C283 | C284 | C285 | C286 | C287 | C288 | C289
   | C290 | C291 | C292 | C293 | C294 | C295 | C296 | C297 | C298 | C299 a
   deriving (Show, Eq)
-mkStorable [t| forall a. Storable a => Storable (Big a) |]
+mkMarshalable [t| forall a. Marshalable a => Marshalable (Big a) |]
 
 -- | An ADT with a mixture of polymorphism and not.
 data Foo2 a
@@ -95,7 +95,7 @@ data Foo2 a
   | Qux2 a a
   | Quux2 Int a
   deriving (Show, Eq)
-mkStorable [t| forall a. Storable a => Storable (Foo2 a) |]
+mkMarshalable [t| forall a. Marshalable a => Marshalable (Foo2 a) |]
 
 
 -- Set the context
@@ -226,28 +226,28 @@ algebraicDataTypes = describe "Algebraic data types" $ do
         z1 = 1.3 :+ 4.5 
         z2 = 6.7 :+ 8.9
     [rust| Cpx<f32> { $(z1: Cpx<f32>) + $(z2: Cpx<f32>) } |] `shouldBe` z1 + z2
-
+  
   it "Can marshal a custom single-constructor ADT argument/return" $ do
     let s1 = StructLike 78 (negate 267)
         s2 = StructLike 92 45223
         s3 = StructLike2 (34, -92391)
         s4 = StructLike2 (576, 1234) 
-    
+  
     for_ [s1,s2] $ \si ->
         [rust| StructLike2 { $(si: StructLike).in2() } |] `shouldBe` in2 si
     for_ [s3,s4] $ \si ->
         [rust| StructLike { $(si: StructLike2).out2() } |] `shouldBe` out2 si
-
+  
   it "Can marshal a custom monomorphic ADT argument/return" $ do
     let f1, f2, f3, f4 :: Foo
         f1 = Baz 'a' 0
         f2 = Baz 'b' 2
         f3 = Qux (7.1 :+ 3.4) 'f'
         f4 = Bar
-
+  
     for_ [f1,f2,f3,f4] $ \fi ->
       [rust| Foo { $(fi: Foo).quux() } |] `shouldBe` quux fi
-
+  
   it "Can marshal nested monomorphic ADT arguments/returns" $ do
     let c1, c2, c3, c4, c5, c6, c7 :: Croc
         c1 = Lob (Just (Baz 'a' 0)) 2
@@ -257,23 +257,23 @@ algebraicDataTypes = describe "Algebraic data types" $ do
         c5 = Lob Nothing 3
         c6 = Boo 3 (-2)
         c7 = Boo (-4) 2
-
+  
     for_ [c1,c2,c3,c4,c5,c6,c7] $ \ci ->
       [rust| Croc { $(ci: Croc).croc() } |] `shouldBe` croc ci
-
+  
   it "Can marshal polymorphic ADT arguments/returns" $ do
     let t1, t2, t3 :: These Int8 Int64
         t1 = This maxBound
         t2 = That 432442
         t3 = Both (maxBound - 3) 879
-
+  
     for_ [t1,t2,t3] $ \ti ->
       let v1 = [rust| These<i16,i64> {
                  $(ti: These<i8,i64>).bimap(|x| x as i16 * 2, |y| y + 2)
                } |]
           v2 = bimap (\x -> fromIntegral x * 2) (+ 2) ti
       in v1 `shouldBe` v2
-
+  
   it "Can marshal nested polymorphic ADT arguments/returns" $ do
     let t1, t2, t3 :: These (Maybe Int) (These Int8 Int8)
         t1 = This (Just 6)
@@ -284,7 +284,7 @@ algebraicDataTypes = describe "Algebraic data types" $ do
         t6 = Both (Just 3) (That 8)
         t7 = Both Nothing (Both 3 5)
         t8 = Both (Just 213) (Both 78 98)
-
+  
     for_ [t1,t2,t3,t4,t5,t6,t7,t8] $ \ti ->
       let v1 = [rust| These<Option<isize>,These<i8,i8>> {
                  $(ti: These<Option<isize>,These<i8,i8>>).bimap(
@@ -294,14 +294,14 @@ algebraicDataTypes = describe "Algebraic data types" $ do
                } |]
           v2 = bimap (fmap (+5)) (bimap (+2) (*3)) ti
       in v1 `shouldBe` v2
-
+  
   it "Can marshal a big ADT whose tag needs more than a `Word8`" $ do
     let b1, b2, b3, b4 :: Big Int64
         b1 = C000
         b2 = C160
         b3 = C298
         b4 = C299 89
-
+  
     for_ [b1,b2,b3,b4] $ \bi ->
       let v1 = [rust| Big<i64> {
                   match $(bi: Big<i64>) {
@@ -315,20 +315,20 @@ algebraicDataTypes = describe "Algebraic data types" $ do
                  C299 i -> C299 (i + 1)
                  b -> b
       in v1 `shouldBe` v2
-
+  
   it "Can marshal a custom `Foo2 Int` and `Foo2 (Foo2 Int)` return" $ do
     let f1, f2, f3, f4 :: Foo2 Int
         f1 = Bar2
         f2 = Baz2 3
         f3 = Qux2 (-1) 2
         f4 = Quux2 (-8) 3
-    
+  
     let fooed f = case f of 
                     Qux2 x y -> Qux2 (Qux2 x y) (Qux2 y x)
                     Quux2 i x -> Quux2 (i + 1) (Qux2 x x)
                     Bar2 -> Bar2
                     Baz2 w -> Baz2 w
-
+  
     let fooed' f = [rust| Foo2<Foo2<isize>> {
       match $(f: Foo2<isize>) {
         Foo2::Qux2(x,y) => Foo2::Qux2(Foo2::Qux2(x,y), Foo2::Qux2(y,x)),
@@ -337,7 +337,7 @@ algebraicDataTypes = describe "Algebraic data types" $ do
         Foo2::Baz2(w) => Foo2::Baz2(w),
       }
     } |]
-
+  
     fooed f1 `shouldBe` fooed' f1
     fooed f2 `shouldBe` fooed' f2
     fooed f3 `shouldBe` fooed' f3

@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 module FunctionPointerTypes where
 
 import Language.Rust.Inline

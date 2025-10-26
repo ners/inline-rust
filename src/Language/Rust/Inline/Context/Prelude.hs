@@ -8,7 +8,6 @@ Stability   : experimental
 Portability : GHC
 -}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -w #-}
@@ -16,7 +15,10 @@ Portability : GHC
 module Language.Rust.Inline.Context.Prelude where
 
 import Language.Rust.Inline.Context
+import Language.Rust.Inline.Context.Marshalable
 import Language.Rust.Inline.TH
+import Language.Rust.Inline.TH.Storable (mkStorable, mkTupleStorable)
+import Language.Rust.Inline.TH.Marshalable (mkMarshalable, mkTupleMarshalable)
 
 import Language.Rust.Data.Ident            ( Ident(..), mkIdent )
 
@@ -38,9 +40,10 @@ import Data.Maybe    ( fromMaybe )
 --   * Tuples up and including to arity 16
 --
 -- Note that arity 0 is in 'Foreign.Storable' and arity 1 makes no sense in Haskell.
-mkStorable [t| forall a. Storable a => Storable (Maybe a) |]
-mkStorable [t| forall l r. (Storable l, Storable r) => Storable (Either l r) |]
-fmap join (traverse mkTupleStorable [2..16])
+mkMarshalable [t| forall a. Marshalable a => Marshalable (Maybe a) |]
+mkMarshalable [t| forall l r. (Marshalable l, Marshalable r) => Marshalable (Either l r) |]
+
+fmap join (traverse mkTupleMarshalable [2..16])
 
 -- | Make a generic path type (e.g. something like @Vec<T>@).
 mkGenPathTy :: Ident -> [Ty ()] -> Ty ()
@@ -64,7 +67,7 @@ maybeContext = do
   where
   rule (PathTy Nothing (Path False [PathSegment "Option" (Just (AngleBracketed [] [t] [] _)) _] _) _) context = do
     (t', rInterOpt) <- lookupRTypeInContext t context
-    let inter = mkGenPathTy "MaybeC" <$> ((\x -> [x]) <$> maybe (pure t) id rInterOpt)
+    let inter = mkGenPathTy "MaybeC" . pure <$> fromMaybe (pure t) rInterOpt
     pure ([t| Maybe $t' |], Just inter)
   rule _ _ = mempty
 
@@ -202,7 +205,7 @@ eitherItems = map unlines
     , "struct RightC<T>(T);"
     ]
     -- impl MarshalInto<EitherC<L,R>> for Result<L,R>
-  , [ "impl<L: Copy, L1:  MarshalInto<L> + Copy, R: Copy, R1: MarshalInto<R> + Copy> MarshalInto<EitherC<L,R>> for Result<R1,L1> {"
+  , [ "impl<L: Copy, L1:  MarshalInto<L>, R: Copy, R1: MarshalInto<R>> MarshalInto<EitherC<L,R>> for Result<R1,L1> {"
     , "  fn marshal(self) -> EitherC<L,R> {"
     , "    match self {"
     , "      Err(l) => EitherC { tag: 0, payload: TaggedEitherC { left: LeftC(l.marshal()) } },"

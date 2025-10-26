@@ -1,6 +1,3 @@
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
-
 module ByteStrings where
 
 import Language.Rust.Inline
@@ -11,8 +8,11 @@ import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Unsafe as ByteString
 import Data.Maybe (fromJust)
 import Data.String
+import Data.Either (fromRight)
+import Language.Rust.Inline.TH
 
 extendContext basic
+extendContext prelude
 extendContext bytestrings
 setCrateModule
 
@@ -36,9 +36,36 @@ bytestringSpec = describe "ByteStrings" $ do
             `shouldBe` rustBs
         ByteString.unsafeFinalize rustBs
 
+    it "can marshal optional ByteString arguments and return values" $ do
+        let rustSum inputs =
+                [rust| Option<u8> {
+                    let inputs = $( inputs: Option<&[u8]> );
+                    inputs.map(|inputs| inputs.iter().sum())
+                } |]
+        let inputs = ByteString.pack [0, 1, 2, 3]
+        rustSum Nothing `shouldBe` Nothing
+        rustSum (Just inputs) `shouldBe` Just (sum $ ByteString.unpack inputs)
+
+    it "can marshal result ByteString arguments" $ do
+        let rustSum inputs =
+                [rust| Result<u8, ()> {
+                    let inputs = $( inputs: Result<&[u8], ()> );
+                    inputs.map(|inputs| inputs.iter().sum())
+                } |]
+        let inputs = ByteString.pack [0, 1, 2, 3]
+        rustSum (Left ()) `shouldBe` Left ()
+        rustSum (Right inputs) `shouldBe` Right (sum $ ByteString.unpack inputs)
+
     it "can marshal optional ByteString return values" $ do
         let noRustBs = [rust| Option<Vec<u8>> { None } |]
         noRustBs `shouldBe` Nothing
 
         let rustBs = [rust| Option<Vec<u8>> { Some(vec![0, 1, 2, 3]) } |]
-        fromJust rustBs `shouldBe` ByteString.pack [0, 1, 2, 3]
+        rustBs `shouldBe` Just (ByteString.pack [0, 1, 2, 3])
+
+    it "can marshal result ByteString return values" $ do
+        let errRustBs = [rust| Result<Vec<u8>, ()> { Err(()) } |]
+        errRustBs `shouldBe` Left ()
+
+        let okRustBs = [rust| Result<Vec<u8>, ()> { Ok(vec![0, 1, 2, 3]) } |]
+        okRustBs `shouldBe` Right (ByteString.pack [0, 1, 2, 3])

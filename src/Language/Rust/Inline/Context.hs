@@ -46,6 +46,7 @@ import GHC.Exts (
     Int#,
     Word#,
  )
+import Data.Void (Void)
 
 -- Easier on the eyes
 type RType = Ty ()
@@ -61,17 +62,17 @@ type.
 newtype Context
     = Context
         ( [RType -> Context -> First (Q HType, Maybe (Q RType))]
-        , -- Given a Rust type in a quasiquote, we need to look up the
+          -- Given a Rust type in a quasiquote, we need to look up the
           -- corresponding Haskell type (for the FFI import) as well as the
           -- C-compatible Rust type (if the initial Rust type isn't already
           -- @#[repr(C)]@.
 
-          [HType -> Context -> First (Q RType)]
-        , -- Given a field in a Haskell ADT, we need to figure out which
+        , [HType -> Context -> First (Q RType)]
+          -- Given a field in a Haskell ADT, we need to figure out which
           -- (not-necessarily @#[repr(C)]@) Rust type normally maps into this
           -- Haskell type.
 
-          [String]
+        , [String]
           -- Source for the trait impls of @MarshalTo@
         )
     deriving (Semigroup, Monoid, Typeable)
@@ -319,13 +320,13 @@ foreignPointers = do
     foreignPtrT <- [t|ForeignPtr|]
     pure $ Context ([rule], [rev foreignPtrT], [foreignPtr, constPtr, mutPtr])
   where
+    htype _ (Just _) = pure ([t| ForeignPtr Void|], Nothing) -- if the pointee needs marshalling, forbid peeking from Haskell
+    htype t Nothing = pure ([t|ForeignPtr $t|], Nothing)
+
     rule (Rptr _ _ t _) context
-        | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
+        | First (Just (t', inter)) <- lookupRTypeInContext t context = htype t' inter
     rule (PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _) context
-        | First (Just (t', Nothing)) <- lookupRTypeInContext t context = pure ([t|ForeignPtr $t'|], Nothing)
-    rule (PathTy Nothing (Path False [PathSegment "Option" (Just (AngleBracketed [] [PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] _)) _] _) _] [] _)) _] _) _) context
-        | First (Just (t', Nothing)) <- lookupRTypeInContext t context =
-            pure ([t|Maybe (ForeignPtr $t')|], pure . pure $ PathTy Nothing (Path False [PathSegment "ForeignPtr" (Just (AngleBracketed [] [t] [] ())) ()] ()) ())
+        | First (Just (t', inter)) <- lookupRTypeInContext t context = htype t' inter
     rule _ _ = mempty
 
     rev _ _ _ = mempty
@@ -334,6 +335,8 @@ foreignPointers = do
         unlines
             [ "#[repr(C)]"
             , "pub struct ForeignPtr<T>(pub *mut T, pub extern \"C\" fn (*mut T));"
+            , "impl<T> Copy for ForeignPtr<T> {}"
+            , "impl<T> Clone for ForeignPtr<T> { fn clone(&self) -> Self { ForeignPtr(self.0, self.1) } }"
             ]
 
     constPtr =
@@ -370,15 +373,6 @@ foreignPointers = do
             , ""
             , "impl<'a, T> MarshalInto<&'a mut T> for &'a mut T {"
             , "  fn marshal(self) -> &'a mut T { self }"
-            , "}"
-            , ""
-            , "impl<T> MarshalInto<ForeignPtr<T>> for Option<ForeignPtr<T>> {"
-            , "  fn marshal(self) -> ForeignPtr<T> {"
-            , "    extern fn panic<T>(_ptr: *mut T) {"
-            , "      panic!(\"Attempted to free a null ForeignPtr\")"
-            , "    }"
-            , "    self.unwrap_or(ForeignPtr(std::ptr::null_mut(), panic))"
-            , "  }"
             , "}"
             ]
 

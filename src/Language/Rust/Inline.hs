@@ -1,6 +1,7 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
 Module      : Language.Rust.Inline
@@ -60,6 +61,7 @@ module Language.Rust.Inline (
     pointers,
     prelude,
     bytestrings,
+    vectors,
     foreignPointers,
 
     -- ** Marshalling
@@ -76,7 +78,7 @@ module Language.Rust.Inline (
     newArray,
     withByteString,
     unsafeLocalState,
-    mkStorable,
+    mkMarshalable,
     mkReprC,
 
     -- * Top-level Rust items
@@ -86,15 +88,15 @@ module Language.Rust.Inline (
 
 import Language.Rust.Inline.Context
 import Language.Rust.Inline.Context.ByteString (bytestrings)
+import Language.Rust.Inline.Context.Vector (vectors)
 import Language.Rust.Inline.Context.Prelude (prelude)
 import Language.Rust.Inline.Internal
 import Language.Rust.Inline.Marshal
 import Language.Rust.Inline.Parser
 import Language.Rust.Inline.Pretty
 import Language.Rust.Inline.TH.ReprC (mkReprC)
-import Language.Rust.Inline.TH.Storable (mkStorable)
+import Language.Rust.Inline.TH.Marshalable (mkMarshalable)
 
-import Language.Haskell.TH (pprParendType)
 import Language.Haskell.TH.Lib
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
 import Language.Haskell.TH.Syntax
@@ -103,16 +105,15 @@ import Foreign.Marshal.Alloc (alloca, free)
 import Foreign.Marshal.Array (newArray, withArrayLen)
 import Foreign.Marshal.Unsafe (unsafeLocalState)
 import Foreign.Marshal.Utils (new, with)
-import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr, nullPtr)
+import Foreign.Ptr (freeHaskellFunPtr)
+import qualified Foreign
 
 import Control.Monad (void)
 import Data.List (intercalate)
 import Data.Traversable (for)
-import Data.Word (Word8)
 import System.Random (randomIO)
 
-import qualified Data.ByteString.Unsafe as ByteString
-import Foreign.Storable (Storable (..))
+import qualified Language.Rust.Inline.Context.Marshalable as Marshalable
 
 {- $overview
 
@@ -279,9 +280,6 @@ rustQuasiQuoter safety isPure supportDecs =
         | supportDecs = emitCodeBlock
         | otherwise = err
 
-showTy :: Type -> String
-showTy = show . pprParendType
-
 {- | This function sums up the packages. What it does:
 
    1. Map the Rust type annotations in the quasiquote to their Haskell types.
@@ -314,72 +312,23 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
     -- Convert the Haskell return type to a marshallable FFI type
     (returnFfi, haskRet') <- do
         marshalForm <- ghcMarshallable haskRet
-        let fptrRet haskRet' = [t|Ptr (Ptr $(pure haskRet'), FunPtr (Ptr $(pure haskRet') -> IO ())) -> IO ()|]
-        let bsRet = [t|Ptr (Ptr Word8, Word, FunPtr (Ptr Word8 -> Word -> IO ())) -> IO ()|]
-        ret <- case marshalForm of
-            BoxedDirect -> [t|IO $(pure haskRet)|]
-            BoxedIndirect -> [t|Ptr $(pure haskRet) -> IO ()|]
-            UnboxedDirect
-                | isPure -> pure haskRet
-                | otherwise ->
-                    let retTy = showTy haskRet
-                     in fail ("Cannot put unlifted type ‘" ++ retTy ++ "’ in IO")
-            ByteString -> bsRet
-            OptionalByteString -> bsRet
-            ForeignPtr
-                | AppT _ haskRet' <- haskRet -> fptrRet haskRet'
-                | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " using the ForeignPtr calling convention")
-            OptionalForeignPtr
-                | AppT _ (AppT _ haskRet') <- haskRet -> fptrRet haskRet'
-                | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " as an optional ForeignPtr")
-        pure (marshalForm, pure ret)
+        pure (marshalForm, returnType marshalForm haskRet)
 
     -- Convert the Haskell arguments to marshallable FFI types
     (marshalForms, haskArgs') <- fmap unzip $
         for haskArgs $ \haskArg -> do
             marshalForm <- ghcMarshallable haskArg
-            case marshalForm of
-                BoxedIndirect
-                    | returnFfi == UnboxedDirect ->
-                        let argTy = showTy haskArg
-                            retTy = showTy haskRet
-                         in fail
-                                ( "Cannot pass an argument ‘"
-                                    ++ argTy
-                                    ++ "’"
-                                    ++ " indirectly when returning an unlifted type "
-                                    ++ "‘"
-                                    ++ retTy
-                                    ++ "’"
-                                )
-                    | otherwise -> do
-                        ptr <- [t|Ptr $(pure haskArg)|]
-                        pure (BoxedIndirect, ptr)
-                ByteString -> do
-                    rbsT <- [t|Ptr (Ptr Word8, Word)|]
-                    pure (ByteString, rbsT)
-                OptionalByteString -> do
-                    rbsT <- [t|Ptr (Ptr Word8, Word)|]
-                    pure (OptionalByteString, rbsT)
-                ForeignPtr
-                    | AppT _ haskArg' <- haskArg -> do
-                        ptr <- [t|Ptr $(pure haskArg')|]
-                        pure (ForeignPtr, ptr)
-                    | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " using the ForeignPtr calling convention")
-                OptionalForeignPtr
-                    | AppT _ (AppT _ haskArg') <- haskArg -> do
-                        ptr <- [t|Ptr $(pure haskArg')|]
-                        pure (OptionalForeignPtr, ptr)
-                    | otherwise -> fail ("Cannot marshal " ++ showTy haskRet ++ " as an optional ForeignPtr")
-                _ -> pure (marshalForm, haskArg)
+            ret <- argumentType marshalForm haskArg
+            pure (marshalForm, ret)
 
     -- Generate the Haskell FFI import declaration and emit it
-    bsFree <- newName $ "bsFree" ++ show (abs q)
-    bsFreeSig <- [t|FunPtr (Ptr Word8 -> Word -> IO ()) -> Ptr Word8 -> Word -> IO ()|]
-    haskSig <- foldr (\l r -> [t|$(pure l) -> $r|]) haskRet' haskArgs'
+    -- bsFree <- newName $ "bsFree" ++ show (abs q)
+    -- bsFreeSig <- [t|FunPtr (Ptr Word8 -> Word -> IO ()) -> Ptr Word8 -> Word -> IO ()|]
+    haskRet'' <- if addIOUnit returnFfi then [t|$(haskRet') -> IO ()|] else haskRet'
+    haskSig <- foldr (\l r -> [t|$(pure l) -> $r|]) (pure haskRet'') haskArgs'
     let ffiImport = ForeignD (ImportF CCall safety qqStrName qqName haskSig)
-    let ffiBsFree = ForeignD (ImportF CCall Safe "dynamic" bsFree bsFreeSig)
-    addTopDecls [ffiImport, ffiBsFree]
+    -- let ffiBsFree = ForeignD (ImportF CCall Safe "dynamic" bsFree bsFreeSig)
+    addTopDecls [ffiImport]
 
     -- Generate the Haskell FFI call
     let goArgs ::
@@ -394,77 +343,18 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
         -- accumulated arguments. If the return value is not marshallable, we have to
         -- 'alloca' some space to put the return value.
         goArgs acc []
-            | returnFfi == ByteString = do
-                ret <- newName "ret"
-                ptr <- newName "ptr"
-                len <- newName "len"
-                finalizer <- newName "finalizer"
-                [e|
-                    alloca
-                        ( \($(varP ret)) -> do
-                            $(appsE (varE qqName : reverse (varE ret : acc)))
-                            ($(varP ptr), $(varP len), $(varP finalizer)) <- peek $(varE ret)
-                            ByteString.unsafePackCStringFinalizer
-                                $(varE ptr)
-                                (fromIntegral $(varE len))
-                                ($(varE bsFree) $(varE finalizer) $(varE ptr) $(varE len))
-                        )
-                    |]
-            | returnFfi == ForeignPtr = do
-                finalizer <- newName "finalizer"
-                ptr <- newName "ptr"
-                ret <- newName "ret"
-                [e|
-                    alloca
-                        ( \($(varP ret)) -> do
-                            $(appsE (varE qqName : reverse (varE ret : acc)))
-                            ($(varP ptr), $(varP finalizer)) <- peek $(varE ret)
-                            newForeignPtr $(varE finalizer) $(varE ptr)
-                        )
-                    |]
-            | returnFfi == OptionalForeignPtr = do
-                finalizer <- newName "finalizer"
-                ptr <- newName "ptr"
-                ret <- newName "ret"
-                [e|
-                    alloca
-                        ( \($(varP ret)) -> do
-                            $(appsE (varE qqName : reverse (varE ret : acc)))
-                            ($(varP ptr), $(varP finalizer)) <- peek $(varE ret)
-                            if $(varE ptr) == nullPtr
-                                then pure Nothing
-                                else Just <$> newForeignPtr $(varE finalizer) $(varE ptr)
-                        )
-                    |]
-            | returnFfi == OptionalByteString = do
-                ret <- newName "ret"
-                ptr <- newName "ptr"
-                len <- newName "len"
-                finalizer <- newName "finalizer"
-                [e|
-                    alloca
-                        ( \($(varP ret)) -> do
-                            $(appsE (varE qqName : reverse (varE ret : acc)))
-                            ($(varP ptr), $(varP len), $(varP finalizer)) <- peek $(varE ret)
-                            if $(varE ptr) == nullPtr
-                                then pure Nothing
-                                else
-                                    Just
-                                        <$> ByteString.unsafePackCStringFinalizer
-                                            $(varE ptr)
-                                            (fromIntegral $(varE len))
-                                            ($(varE bsFree) $(varE finalizer) $(varE ptr) $(varE len))
-                        )
-                    |]
             | returnByValue returnFfi = appsE (varE qqName : reverse acc)
             | otherwise = do
                 ret <- newName "ret"
                 [e|
-                    alloca
+                    Foreign.allocaBytesAligned
+                        (Marshalable.sizeOfPeek (undefined :: $(pure haskRet)))
+                        (Marshalable.alignmentPeek (undefined :: $(pure haskRet)))
                         ( \($(varP ret)) ->
                             do
                                 $(appsE (varE qqName : reverse (varE ret : acc)))
-                                peek $(varE ret)
+                                r :: $(pure haskRet) <- Marshalable.peek $(varE ret)
+                                pure r
                         )
                     |]
 
@@ -475,37 +365,11 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
             case arg of
                 Nothing -> fail ("Could not find Haskell variable ‘" ++ argStr ++ "’")
                 Just argName
-                    | marshalForm == ByteString -> do
-                        ptr <- newName "ptr"
-                        len <- newName "len"
-                        bsp <- newName "bsp"
-                        [e|
-                            withByteString
-                                $(varE argName)
-                                ( \($(varP ptr)) ($(varP len)) ->
-                                    with ($(varE ptr), $(varE len)) (\($(varP bsp)) -> $(goArgs (varE bsp : acc) args))
-                                )
-                            |]
-                    | marshalForm == ForeignPtr -> do
-                        ptr <- newName "ptr"
-                        [e|
-                            withForeignPtr $(varE argName) (\($(varP ptr)) -> $(goArgs (varE ptr : acc) args))
-                            |]
-                    | marshalForm == OptionalForeignPtr -> do
-                        ptr <- newName "ptr"
-                        fptr <- newName "fptr"
-                        [e|
-                            case $(varE argName) of
-                                Nothing -> let $(varP ptr) = nullPtr in $(goArgs (varE ptr : acc) args)
-                                Just $(varP fptr) ->
-                                    withForeignPtr $(varE fptr) (\($(varP ptr)) -> $(goArgs (varE ptr : acc) args))
-                            |]
-                    | marshalForm == OptionalByteString -> fail "Don't"
                     | passByValue marshalForm -> goArgs (varE argName : acc) args
                     | otherwise -> do
                         x <- newName "x"
                         [e|
-                            with
+                            Marshalable.with
                                 $(varE argName)
                                 ( \($(varP x)) ->
                                     $(goArgs (varE x : acc) args)
@@ -514,7 +378,7 @@ processQQ safety isPure (QQParse rustRet rustBody rustNamedArgs) = do
 
     let haskCall' = goArgs [] (rustArgNames `zip` marshalForms)
         haskCall =
-            if isPure && returnFfi /= UnboxedDirect
+            if isPure && runsInIO returnFfi
                 then [e|unsafeLocalState $haskCall'|]
                 else haskCall'
 

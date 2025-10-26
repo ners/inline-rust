@@ -10,6 +10,7 @@ Portability : GHC
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Language.Rust.Inline.Marshal where
 
@@ -32,21 +33,14 @@ import Data.Array.Storable         ( StorableArray, Ix, withStorableArray,
 
 import GHC.Exts
 
-data MarshalForm
-  = UnboxedDirect      -- ^ value is marshallable and must be passed directly to the FFI
-  | BoxedDirect        -- ^ value is marshallable and can be passed directly to the FFI
-  | BoxedIndirect      -- ^ value isn't marshallable directly but may be passed indirectly via a 'Ptr'
-  | ByteString
-  | ForeignPtr
-  | OptionalForeignPtr
-  | OptionalByteString
-  deriving (Eq, Show)
-
-passByValue :: MarshalForm -> Bool
-passByValue = (`elem` [UnboxedDirect, BoxedDirect, ForeignPtr])
-
-returnByValue :: MarshalForm -> Bool
-returnByValue = (`elem` [UnboxedDirect, BoxedDirect])
+data MarshalForm = MarshalForm
+    { passByValue :: Bool
+    , returnByValue :: Bool
+    , returnType :: Type -> Q Type
+    , argumentType :: Type -> Q Type
+    , runsInIO :: Bool
+    , addIOUnit :: Bool
+    }
 
 -- | Identify which types can be marshalled by the GHC FFI and which types are
 -- unlifted. A negative response to the first of these questions doesn't mean
@@ -61,21 +55,58 @@ ghcMarshallable ty = do
    simpleB <- sequence qSimpleBoxed
    tyconsU <- sequence qTyconsUnboxed
    tyconsB <- sequence qTyconsBoxed
+   unitType <- [t| () |]
    bytestring <- [t| ByteString |]
    fptrCons <- [t| ForeignPtr |]
-   maybeCons <- [t| Maybe |]
+
+   let unboxedDirect = MarshalForm
+           { passByValue = True
+           , returnByValue = True
+           , returnType = pure
+           , argumentType = pure
+           , runsInIO = False
+           , addIOUnit = False
+           }
+       boxedDirect = unboxedDirect{ returnType = \t -> [t|IO $(pure t)|], runsInIO = True }
+       unitDirect = boxedDirect { passByValue = False, argumentType = \t -> [t|Ptr $(pure t)|] }
+       boxedIndirect = MarshalForm
+           { passByValue = False
+           , returnByValue = False
+           , returnType = const [t|Ptr ()|]
+           , argumentType = \t -> [t|Ptr $(pure t)|]
+           , runsInIO = True
+           , addIOUnit = True
+           }
+       foreignPtr = MarshalForm
+           { passByValue = False
+           , returnByValue = False
+           , returnType = \case
+                AppT _ r -> [t|Ptr (Ptr $(pure r), FunPtr (Ptr $(pure r) -> IO ()))|]
+                t -> fail $ "Cannot marshal " <> (show . pprParendType) t <> " as a ForeignPtr"
+           , argumentType = \case
+                AppT _ r -> [t|Ptr (ForeignPtr $(pure r))|]
+                t -> fail $ "Cannot marshal " <> (show . pprParendType) t <> " as a ForeignPtr"
+           , runsInIO = True
+           , addIOUnit = True
+           }
+       byteString = MarshalForm
+           { passByValue = False
+           , returnByValue = False
+           , returnType = const [t|Ptr (Ptr Word8, Word, FunPtr (Ptr Word8 -> Word -> IO ()))|]
+           , argumentType = const [t|Ptr ByteString|]
+           , runsInIO = True
+           , addIOUnit = True
+           }
 
    case ty of
-     _          | ty  `elem` simpleU -> pure UnboxedDirect
-                | ty  `elem` simpleB -> pure BoxedDirect
-                | ty == bytestring   -> pure ByteString
-     AppT con _ | con `elem` tyconsU -> pure UnboxedDirect
-                | con `elem` tyconsB -> pure BoxedDirect
-                | con == fptrCons    -> pure ForeignPtr
-     AppT mb (AppT c _)
-                | mb == maybeCons && c == fptrCons -> pure OptionalForeignPtr
-     AppT mb c | mb == maybeCons && c == bytestring -> pure OptionalByteString
-     _ -> pure BoxedIndirect
+     _          | ty  `elem` simpleU -> pure unboxedDirect
+                | ty  `elem` simpleB -> pure boxedDirect
+                | ty == unitType     -> pure unitDirect
+                | ty == bytestring   -> pure byteString
+     AppT con _ | con `elem` tyconsU -> pure unboxedDirect
+                | con `elem` tyconsB -> pure boxedDirect
+                | con == fptrCons    -> pure foreignPtr
+     _ -> pure boxedIndirect
   where
   qSimpleUnboxed = [ [t| Char#   |]
                    , [t| Int#    |]
@@ -97,7 +128,7 @@ ghcMarshallable ty = do
                    , [t| Double |]
                    , [t| Float  |]
                    
-                   , [t| Bool |], [t| () |] -- TODO: let through `IO ()` but not `()`
+                   , [t| Bool |]
                    
                    , [t| Int8  |], [t| Int16  |], [t| Int32  |], [t| Int64  |]
                    , [t| Word8 |], [t| Word16 |], [t| Word32 |], [t| Word64 |]

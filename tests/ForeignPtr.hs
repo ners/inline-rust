@@ -1,23 +1,27 @@
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
-
 module ForeignPtr where
 
 import Language.Rust.Inline
+import Language.Rust.Quote
 
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isJust)
 import Data.Word (Word64)
 import Foreign (Storable (..))
 import Foreign.ForeignPtr
 import Foreign.Ptr
 import Test.Hspec
+import Data.Either (fromRight)
 
 extendContext foreignPointers
 extendContext pointers
 extendContext prelude
 extendContext basic
 setCrateModule
+
+
+extendContext (singleton [ty| NotCopy |] [t| () |])
+[rust|
+pub struct NotCopy(());
+|]
 
 foreignPtrTypes :: Spec
 foreignPtrTypes = describe "ForeignPtr types" $ do
@@ -59,6 +63,19 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
                 } |]
         withForeignPtr (fromJust mp) peek >>= (`shouldBe` 42)
 
+    it "Can marshal result ForeignPtr returns" $ do
+        let mp =
+                [rust| Result<ForeignPtr<u64>, ()> {
+                    Err(())
+                } |]
+        mp `shouldBe` Left ()
+
+        let mp =
+                [rust| Result<ForeignPtr<u64>, ()> {
+                    Ok(Box::new(42).into())
+                } |]
+        withForeignPtr (fromRight undefined mp) peek >>= (`shouldBe` 42)
+
     it "still has working pointers" $
         alloca $ \p -> do
             [rustIO| () {
@@ -71,3 +88,8 @@ foreignPtrTypes = describe "ForeignPtr types" $ do
                     unsafe { *$(p: *u64) }
                 } |]
             val `shouldBe` 42
+
+    it "still works without Copy" $ do
+        let mp = [rust| Option<ForeignPtr<NotCopy>> { Some(Box::new(NotCopy(())).into()) } |]
+        mp `shouldSatisfy` isJust
+

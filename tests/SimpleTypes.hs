@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 module SimpleTypes where
 
 import Language.Rust.Inline
@@ -67,7 +66,7 @@ simpleTypes = describe "Simple types" $ do
   it "Can marshal a `Bool` argument/return" $ do
     let x = 0 :: Word8
     [rust| bool { !$(x: bool) } |] `shouldBe` (1 :: Word8)
-  
---   it "Can marshal a `()` argument/return" $ do
---     let x = ()
---     [rust| () { $(x: ()) } |] `shouldBe` ()
+
+  it "Can marshal a `()` argument/return" $ do
+    let x = ()
+    [rust| () { $(x: ()) } |] `shouldBe` ()
